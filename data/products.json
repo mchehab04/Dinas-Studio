@@ -1,0 +1,294 @@
+[
+  {
+    "id": 1,
+    "name": "Rosewater Two-Piece Set",
+    "cat": "Matching Sets",
+    "price": 128,
+    "pop": 98,
+    "stock": "in",
+    "sizes": [
+      "XS",
+      "S",
+      "M",
+      "L",
+      "XL"
+    ],
+    "soldOut": [],
+    "desc": "A breezy co-ord in whisper-soft crepe \u2014 cropped top and matching wide-leg trouser, finished with our signature heart button.",
+    "nw": false,
+    "image": "https://via.placeholder.com/400x500/F7DCE1/832D2D?text=Rosewater+Set"
+  },
+  {
+    "id": 2,
+    "name": "Blush Bloom Kimono",
+    "cat": "Kimonos",
+    "price": 96,
+    "pop": 87,
+    "stock": "low",
+    "sizes": [
+      "S",
+      "M",
+      "L"
+    ],
+    "soldOut": [
+      "S"
+    ],
+    "desc": "Open-front kimono in flowing chiffon with hand-finished edges, perfect layered over any set.",
+    "nw": true,
+    "image": "https://via.placeholder.com/400x500/F3C7CC/A63A3A?text=Blush+Kimono"
+  },
+  {
+    "id": 3,
+    "name": "Maroon Muse Abaya",
+    "cat": "Abayas",
+    "price": 154,
+    "pop": 95,
+    "stock": "in",
+    "sizes": [
+      "XS",
+      "S",
+      "M",
+      "L",
+      "XL"
+    ],
+    "soldOut": [],
+    "desc": "Our best-selling silhouette \u2014 a structured shoulder, flowing skirt, and hidden side pockets in matte crepe.",
+    "nw": false,
+    "image": "https://via.placeholder.com/400x500/A63A3A/FFFFFF?text=Maroon+Abaya"
+  },
+  {
+    "id": 4,
+    "name": "Heartstring Satin Set",
+    "cat": "Matching Sets",
+    "price": 142,
+    "pop": 91,
+    "stock": "in",
+    "sizes": [
+      "S",
+      "M",
+      "L"
+    ],
+    "soldOut": [],
+    "desc": "Liquid satin cami and trouser set that catches the light with every step.",
+    "nw": true,
+    "image": "https://via.placeholder.com/400x500/D97C8B/FFFFFF?text=Satin+Set"
+  },
+  {
+    "id": 5,
+    "name": "Dusty Rose Wrap Kimono",
+    "cat": "Kimonos",
+    "price": 88,
+    "pop": 74,
+    "stock": "in",
+    "sizes": [
+      "XS",
+      "S",
+      "M",
+      "L"
+    ],
+    "soldOut": [],
+    "desc": "A lightweight wrap kimono with tie waist, dressy enough for evenings, easy enough for everyday.",
+    "nw": false,
+    "image": "https://via.placeholder.com/400x500/C55B54/FFFFFF?text=Wrap+Kimono"
+  },
+  {
+    "id": 6,
+    "name": "Studio Classic Abaya",
+    "cat": "Abayas",
+    "price": 139,
+    "pop": 82,
+    "stock": "out",
+    "sizes": [
+      "S",
+      "M",
+      "L",
+      "XL"
+    ],
+    "soldOut": [
+      "S",
+      "M",
+      "L",
+      "XL"
+    ],
+    "desc": "The everyday essential \u2014 clean lines, breathable fabric, and a relaxed drape.",
+    "nw": false,
+    "image": "https://via.placeholder.com/400x500/8A6B63/FFFFFF?text=Classic+Abaya"
+  },
+  {
+    "id": 7,
+    "name": "Sweetheart Pearl Clip",
+    "cat": "Accessories",
+    "price": 22,
+    "pop": 65,
+    "stock": "in",
+    "sizes": [
+      "One Size"
+    ],
+    "soldOut": [],
+    "desc": "Hand-set pearl hair clip finished with our signature heart charm.",
+    "nw": false,
+    "image": "https://via.placeholder.com/400x500/FDF3F0/A63A3A?text=Pearl+Clip"
+  },
+  {
+    "id": 8,
+    "name": "Cocoa Cream Set",
+    "cat": "Matching Sets",
+    "price": 118,
+    "pop": 79,
+    "stock": "in",
+    "sizes": [
+      "XS",
+      "S",
+      "M",
+      "L",
+      "XL"
+    ],
+    "soldOut": [],
+    "desc": "Ribbed knit set in warm cocoa \u2014 soft-structured top with a matching midi skirt.",
+    "nw": false,
+    "image": "https://via.placeholder.com/400x500/6B4D45/FFFFFF?text=Cocoa+Set"
+  },
+  {
+    "id": 9,
+    "name": "Golden Hour Abaya",
+    "cat": "Abayas",
+    "price": 168,
+    "pop": 93,
+    "stock": "low",
+    "sizes": [
+      "S",
+      "M",
+      "L"
+    ],
+    "soldOut": [
+      "L"
+    ],
+    "desc": "Statement piece with subtle gold embroidery along the cuff and hem.",
+    "nw": true,
+    "image": "https://via.placeholder.com/400x500/CFA15C/FFFFFF?text=Golden+Abaya"
+  },
+  {
+    "id": 10,
+    "name": "Candy Rose Kimono",
+    "cat": "Kimonos",
+    "price": 79,
+    "pop": 58,
+    "stock": "in",
+    "sizes": [
+      "S",
+      "M",
+      "L",
+      "XL"
+    ],
+    "soldOut": [],
+    "desc": "Playful print kimono in our softest rayon blend, cinched with a self-tie belt.",
+    "nw": false,
+    "image": "https://via.placeholder.com/400x500/E89BA3/A63A3A?text=Candy+Kimono"
+  },
+  {
+    "id": 11,
+    "name": "Velvet Bow Headband",
+    "cat": "Accessories",
+    "price": 18,
+    "pop": 44,
+    "stock": "in",
+    "sizes": [
+      "One Size"
+    ],
+    "soldOut": [],
+    "desc": "Plush velvet bow headband in dusty rose.",
+    "nw": false,
+    "image": "https://via.placeholder.com/400x500/F7DCE1/832D2D?text=Velvet+Bow"
+  },
+  {
+    "id": 12,
+    "name": "Terracotta Trail Set",
+    "cat": "Matching Sets",
+    "price": 134,
+    "pop": 70,
+    "stock": "low",
+    "sizes": [
+      "XS",
+      "S",
+      "M"
+    ],
+    "soldOut": [
+      "XS"
+    ],
+    "desc": "Textured linen-blend set with a relaxed shirt and tapered trouser.",
+    "nw": false,
+    "image": "https://via.placeholder.com/400x500/C58B6B/FFFFFF?text=Terracotta+Set"
+  },
+  {
+    "id": 13,
+    "name": "Ivory Whisper Abaya",
+    "cat": "Abayas",
+    "price": 149,
+    "pop": 88,
+    "stock": "in",
+    "sizes": [
+      "XS",
+      "S",
+      "M",
+      "L",
+      "XL"
+    ],
+    "soldOut": [],
+    "desc": "Airy ivory abaya with delicate button trim down the front.",
+    "nw": false,
+    "image": "https://via.placeholder.com/400x500/FFFCFB/A63A3A?text=Ivory+Abaya"
+  },
+  {
+    "id": 14,
+    "name": "Blossom Belt Kimono",
+    "cat": "Kimonos",
+    "price": 92,
+    "pop": 61,
+    "stock": "in",
+    "sizes": [
+      "M",
+      "L",
+      "XL"
+    ],
+    "soldOut": [],
+    "desc": "Longline kimono with a woven belt and soft frayed hem detail.",
+    "nw": false,
+    "image": "https://via.placeholder.com/400x500/EFD6D9/832D2D?text=Blossom+Kimono"
+  },
+  {
+    "id": 15,
+    "name": "Ruby Charm Studs",
+    "cat": "Accessories",
+    "price": 26,
+    "pop": 52,
+    "stock": "in",
+    "sizes": [
+      "One Size"
+    ],
+    "soldOut": [],
+    "desc": "Everyday stud earrings in a warm ruby tone, nickel-free.",
+    "nw": false,
+    "image": "https://via.placeholder.com/400x500/832D2D/FFFFFF?text=Ruby+Studs"
+  },
+  {
+    "id": 16,
+    "name": "Coral Sunset Set",
+    "cat": "Matching Sets",
+    "price": 124,
+    "pop": 68,
+    "stock": "out",
+    "sizes": [
+      "S",
+      "M",
+      "L"
+    ],
+    "soldOut": [
+      "S",
+      "M",
+      "L"
+    ],
+    "desc": "Vibrant coral set in soft-touch modal, cropped top with a flowy palazzo pant.",
+    "nw": false,
+    "image": "https://via.placeholder.com/400x500/C55B54/FFFFFF?text=Coral+Set"
+  }
+]

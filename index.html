@@ -1,0 +1,250 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+<title>Dina's Studio</title>
+
+<meta name="description" content="Dinas Studio - Modest fashion matching sets, abayas, and kimonos.">
+<meta property="og:title" content="Dina's Studio">
+<meta property="og:description" content="Modest fashion matching sets, abayas, and kimonos designed for effortless elegance.">
+<meta property="og:image" content="Logo.jpeg">
+<meta property="og:type" content="website">
+<link rel="icon" type="image/jpeg" href="Logo.jpeg">
+
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Baloo+2:wght@500;600;700;800&family=Caveat:wght@500;600;700&family=Nunito+Sans:ital,wght@0,400;0,500;0,600;0,700;1,400&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="css/styles.css">
+</head>
+<body>
+
+<div id="app">
+
+  <!-- ===== Top Bar ===== -->
+  <div class="topbar">
+    <div class="brandmark" style="height: 40px; display:flex; align-items:center;">
+      <img src="Logo.jpeg" alt="Dina's Studio" style="height: 100%; object-fit: contain; border-radius: 8px;">
+    </div>
+    <div class="desktopnav" id="desktopNav"></div>
+    <div class="icon-row">
+      <button class="icon-btn" aria-label="Account" onclick="openAccount()">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="8" r="4"/><path d="M4 21c0-4 4-6 8-6s8 2 8 6"/></svg>
+      </button>
+      <button class="icon-btn" aria-label="Shopping Bag" onclick="openBag()">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M6 8h12l-1 12H7L6 8z"/><path d="M9 8V6a3 3 0 0 1 6 0v2"/></svg>
+        <span class="badge" id="bagBadge" style="display:none">0</span>
+      </button>
+    </div>
+  </div>
+
+  <!-- ===== Main nav tabs: About / Shop / Socials (mobile) ===== -->
+  <div class="toptabs" id="topTabs"></div>
+
+  <!-- ===== SHOP VIEW ===== -->
+  <div id="shopView">
+
+    <!-- ===== Search ===== -->
+    <div class="searchwrap">
+      <div class="searchbar">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#B99B95" stroke-width="2"><circle cx="11" cy="11" r="7"/><path d="m21 21-4.3-4.3"/></svg>
+        <input id="searchInput" placeholder="Search abayas, kimonos, sets..." oninput="renderGrid()">
+      </div>
+    </div>
+
+    <!-- ===== Hero ===== -->
+    <div class="hero">
+      <div class="eyebrow">new season</div>
+      <h1>Wrapped in softness, styled with heart</h1>
+      <p>Matching sets, abayas & kimonos designed for effortless elegance — made to move with you.</p>
+      <button class="hero-cta" onclick="scrollToShop()">
+        Shop the collection
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3"><path d="M5 12h14M13 6l6 6-6 6"/></svg>
+      </button>
+    </div>
+    <div class="scallop"></div>
+
+    <!-- ===== Section head + sort/filter ===== -->
+    <div class="section-head" id="shopAnchor">
+      <h2 id="shopTitle">Shop All</h2>
+      <span class="count-tag" id="resultCount">16 pieces</span>
+    </div>
+    <div class="sortbar">
+      <button class="filter-btn" aria-label="Toggle Filters" onclick="toggleFilters()">
+        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M4 6h16M7 12h10M10 18h4"/></svg>
+        Filter
+      </button>
+      <div style="position:relative;">
+        <button class="sort-btn" aria-label="Toggle Sort" onclick="toggleSort()">
+          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M7 4v16M7 4l-3 3M7 4l3 3M17 20V4M17 20l-3-3M17 20l3-3"/></svg>
+          <span id="sortLabel">Popularity</span>
+        </button>
+        <div class="sort-menu" id="sortMenu">
+          <button data-sort="popularity" onclick="setSort('popularity','Popularity')">Popularity <span>★</span></button>
+          <button data-sort="price-asc" onclick="setSort('price-asc','Price: Low to High')">Price: Low to High</button>
+          <button data-sort="price-desc" onclick="setSort('price-desc','Price: High to Low')">Price: High to Low</button>
+          <button data-sort="availability" onclick="setSort('availability','Availability')">Availability</button>
+          <button data-sort="new" onclick="setSort('new','Newest')">Newest</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- ===== Filter panel (collapsible) ===== -->
+    <div class="filter-panel" id="filterPanel" style="display:none;">
+      <h4 style="margin-top:0;">Category</h4>
+      <div class="avail-row" id="categoryRow"></div>
+      <h4>Availability</h4>
+      <div class="avail-row" id="availRow"></div>
+      <h4>Price range</h4>
+      <div class="price-range" id="priceRow"></div>
+    </div>
+
+    <!-- ===== Product Grid ===== -->
+    <div class="grid" id="productGrid"></div>
+
+  </div>
+
+  <!-- ===== ABOUT VIEW ===== -->
+  <div id="aboutView" style="display:none;">
+
+    <div class="hero">
+      <div class="eyebrow">our story</div>
+      <h1>Made with heart, from day one</h1>
+      <p>The story behind Dina's Studio — where it started, and why every piece carries a little heart.</p>
+    </div>
+    <div class="scallop"></div>
+
+    <div class="about-content">
+      <span class="milestone-badge">♥ Est. 2023 · Founded by Dina</span>
+
+      <div class="about-block">
+        <h3>Where it began</h3>
+        <p>Dina's Studio started small — a handful of matching sets sewn between late nights, built on the idea that modest fashion shouldn't have to choose between comfort and elegance. What began as pieces made for friends and family quickly grew into a studio of its own, built one abaya, one kimono, and one heart-stitched detail at a time.</p>
+      </div>
+
+      <div class="story-quote">"I wanted every piece to feel like it was made for someone I love — because it was."</div>
+
+      <div class="founder-row">
+        <div class="founder-portrait">D</div>
+        <div>
+          <div class="founder-name">Dina</div>
+          <div class="founder-role">Founder & Designer</div>
+        </div>
+      </div>
+
+      <div class="about-block">
+        <h3>The inspiration</h3>
+        <p>Every collection draws from soft, romantic color palettes and flowing silhouettes — a blend of heritage modestwear and everyday ease. The heart in our logo isn't just a mark, it's a promise: that every stitch is made with the same care we'd want for our own family.</p>
+      </div>
+
+      <div class="about-block">
+        <h3>What we stand for</h3>
+        <div class="values-row">
+          <span class="value-chip">Modest by design</span>
+          <span class="value-chip">Made with care</span>
+          <span class="value-chip">Comfort first</span>
+          <span class="value-chip">Small-batch quality</span>
+        </div>
+      </div>
+
+      <div class="placeholder-note">This is placeholder brand copy to get the page started — share your real founding story, date, and photo, and I'll drop them right in.</div>
+    </div>
+  </div>
+
+  <!-- ===== SOCIALS SECTION (always at the bottom of the page) ===== -->
+  <div class="socials-section" id="socialsSection">
+    <div class="eyebrow-label">say hi</div>
+    <h2>Find us on socials</h2>
+    <p class="socials-sub">Follow along for new drops, behind-the-scenes, and styling inspiration.</p>
+    <div class="social-cards">
+      <a class="social-card" href="https://instagram.com/dinas.studio" target="_blank" rel="noopener">
+        <div class="social-icon-circle" style="background:linear-gradient(135deg,#F5A24C,#D9376E,#832D8C);">
+          <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2"><rect x="3" y="3" width="18" height="18" rx="5"/><circle cx="12" cy="12" r="4"/><circle cx="17.5" cy="6.5" r="1"/></svg>
+        </div>
+        <div class="social-handle">@dinas.studio</div>
+        <div class="social-follow">Instagram</div>
+        <span class="social-cta">Follow →</span>
+      </a>
+      <a class="social-card" href="https://www.tiktok.com/@dinas.studio" target="_blank" rel="noopener">
+        <div class="social-icon-circle" style="background:linear-gradient(135deg,#25F4EE,#232323,#FE2C55);">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="#fff"><path d="M16.5 3c.3 2 1.7 3.6 3.8 3.9v3c-1.4 0-2.7-.4-3.8-1.2v6.8c0 3.6-3 6.5-6.6 6.5S3.3 19.1 3.3 15.5 6.3 9 9.9 9c.3 0 .6 0 .9.1v3.1c-.3-.1-.6-.1-.9-.1a3.4 3.4 0 1 0 3.4 3.4V3h3.2z"/></svg>
+        </div>
+        <div class="social-handle">@dinas.studio</div>
+        <div class="social-follow">TikTok</div>
+        <span class="social-cta">Follow →</span>
+      </a>
+    </div>
+  </div>
+
+  <!-- ===== Bottom Nav (mobile) ===== -->
+  <div class="bottomnav">
+    <button class="nav-item active" aria-label="Home" data-tab="home" onclick="setTab('home')">
+      <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 11l9-7 9 7"/><path d="M5 10v10h14V10"/></svg>
+      Home
+    </button>
+    <button class="nav-item" aria-label="Shop" data-tab="shop" onclick="setTab('shop')">
+      <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="4" y="7" width="16" height="14" rx="2"/><path d="M9 7a3 3 0 0 1 6 0"/></svg>
+      Shop
+    </button>
+    <button class="nav-item" aria-label="Wishlist" data-tab="wish" onclick="openWishlist()">
+      <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 21s-7-4.35-9.5-8.5C.7 8.6 3 5 6.6 5 9 5 11 6.5 12 8c1-1.5 3-3 5.4-3 3.6 0 5.9 3.6 4.1 7.5C19 16.65 12 21 12 21z"/></svg>
+      Saved
+    </button>
+    <button class="nav-item" aria-label="Bag" data-tab="bag" aria-label="Shopping Bag" onclick="openBag()">
+      <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M6 8h12l-1 12H7L6 8z"/><path d="M9 8V6a3 3 0 0 1 6 0v2"/></svg>
+      Bag
+      <span class="nb" id="navBagBadge" style="display:none">0</span>
+    </button>
+    <button class="nav-item" aria-label="Account" data-tab="account" aria-label="Account" onclick="openAccount()">
+      <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="8" r="4"/><path d="M4 21c0-4 4-6 8-6s8 2 8 6"/></svg>
+      Account
+    </button>
+  </div>
+</div>
+
+<!-- ===== Overlay ===== -->
+<div class="overlay" id="overlay" aria-label="Close" onclick="closeAllSheets()"></div>
+
+<!-- ===== Product Detail Sheet ===== -->
+<div class="sheet" id="pdSheet">
+  <div class="sheet-handle"></div>
+  <div style="display:flex; justify-content:flex-end; padding:0 16px;">
+    <button class="close-x" aria-label="Close" onclick="closeAllSheets()">✕</button>
+  </div>
+  <div id="pdContent"></div>
+</div>
+
+<!-- ===== Bag Sheet ===== -->
+<div class="sheet" id="bagSheet">
+  <div class="sheet-handle"></div>
+  <div class="sheet-header">
+    <h3>Your Bag</h3>
+    <button class="close-x" aria-label="Close" onclick="closeAllSheets()">✕</button>
+  </div>
+  <div id="bagContent"></div>
+</div>
+
+<!-- ===== Account Sheet ===== -->
+<div class="sheet" id="accountSheet">
+  <div class="sheet-handle"></div>
+  <div class="sheet-header">
+    <h3 id="accountTitle">Account</h3>
+    <button class="close-x" aria-label="Close" onclick="closeAllSheets()">✕</button>
+  </div>
+  <div id="accountContent"></div>
+</div>
+
+<!-- ===== Wishlist Sheet ===== -->
+<div class="sheet" id="wishSheet">
+  <div class="sheet-handle"></div>
+  <div class="sheet-header">
+    <h3>Saved for later</h3>
+    <button class="close-x" aria-label="Close" onclick="closeAllSheets()">✕</button>
+  </div>
+  <div id="wishContent"></div>
+</div>
+
+<div class="toast" id="toast"></div>
+
+<script src="js/app.js"></script>
+</body>
+</html>
