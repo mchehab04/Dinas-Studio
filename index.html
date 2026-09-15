@@ -57,11 +57,11 @@
       <!-- ===== Search ===== -->
       <div class="searchwrap">
         <div class="searchbar">
-          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#B99B95" stroke-width="2">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#7D6965" stroke-width="2">
             <circle cx="11" cy="11" r="7" />
             <path d="m21 21-4.3-4.3" />
           </svg>
-          <input id="searchInput" placeholder="Search abayas, kimonos, sets..." oninput="renderGrid()">
+          <input id="searchInput" placeholder="Search abayas, kimonos, sets..." oninput="onSearchInput()">
         </div>
       </div>
 
@@ -117,12 +117,44 @@
         <div class="avail-row" id="categoryRow"></div>
         <h4>Availability</h4>
         <div class="avail-row" id="availRow"></div>
-        <h4>Price range</h4>
-        <div class="price-range" id="priceRow"></div>
+
       </div>
 
       <!-- ===== Product Grid ===== -->
-      <div class="grid" id="productGrid"></div>
+      <div class="grid" id="productGrid">
+        <div class="skeleton-card">
+          <div class="skeleton-img"></div>
+          <div class="skeleton-body">
+            <div class="skeleton-line" style="width:40%;"></div>
+            <div class="skeleton-line"></div>
+            <div class="skeleton-line short"></div>
+          </div>
+        </div>
+        <div class="skeleton-card">
+          <div class="skeleton-img"></div>
+          <div class="skeleton-body">
+            <div class="skeleton-line" style="width:40%;"></div>
+            <div class="skeleton-line"></div>
+            <div class="skeleton-line short"></div>
+          </div>
+        </div>
+        <div class="skeleton-card">
+          <div class="skeleton-img"></div>
+          <div class="skeleton-body">
+            <div class="skeleton-line" style="width:40%;"></div>
+            <div class="skeleton-line"></div>
+            <div class="skeleton-line short"></div>
+          </div>
+        </div>
+        <div class="skeleton-card">
+          <div class="skeleton-img"></div>
+          <div class="skeleton-body">
+            <div class="skeleton-line" style="width:40%;"></div>
+            <div class="skeleton-line"></div>
+            <div class="skeleton-line short"></div>
+          </div>
+        </div>
+      </div>
 
     </div>
 
@@ -174,9 +206,6 @@
             <span class="value-chip">Premier Fabric Quality</span>
           </div>
         </div>
-
-        <div class="placeholder-note">This is placeholder brand copy to get the page started — share your real founding
-          story, date, and photo, and I'll drop them right in.</div>
       </div>
     </div>
 
@@ -214,28 +243,21 @@
 
     <!-- ===== Bottom Nav (mobile) ===== -->
     <div class="bottomnav">
-      <button class="nav-item active" aria-label="Home" data-tab="home" onclick="setTab('home')">
-        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-          <path d="M3 11l9-7 9 7" />
-          <path d="M5 10v10h14V10" />
-        </svg>
-        Home
-      </button>
-      <button class="nav-item" aria-label="Shop" data-tab="shop" onclick="setTab('shop')">
+      <button class="nav-item" aria-label="Shop" data-tab="shop" onclick="setView('shop')">
         <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
           <rect x="4" y="7" width="16" height="14" rx="2" />
           <path d="M9 7a3 3 0 0 1 6 0" />
         </svg>
         Shop
       </button>
-      <button class="nav-item" aria-label="Wishlist" data-tab="wish" onclick="openWishlist()">
+      <button class="nav-item" aria-label="Saved items" data-tab="wish" onclick="openWishlist()">
         <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
           <path
             d="M12 21s-7-4.35-9.5-8.5C.7 8.6 3 5 6.6 5 9 5 11 6.5 12 8c1-1.5 3-3 5.4-3 3.6 0 5.9 3.6 4.1 7.5C19 16.65 12 21 12 21z" />
         </svg>
         Saved
       </button>
-      <button class="nav-item" aria-label="Bag" data-tab="bag" aria-label="Shopping Bag" onclick="openBag()">
+      <button class="nav-item" aria-label="Shopping bag" data-tab="bag" onclick="openBag()">
         <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
           <path d="M6 8h12l-1 12H7L6 8z" />
           <path d="M9 8V6a3 3 0 0 1 6 0v2" />
@@ -243,7 +265,7 @@
         Bag
         <span class="nb" id="navBagBadge" style="display:none">0</span>
       </button>
-      <button class="nav-item" aria-label="Account" data-tab="account" aria-label="Account" onclick="openAccount()">
+      <button class="nav-item" aria-label="Account" data-tab="account" onclick="openAccount()">
         <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
           <circle cx="12" cy="8" r="4" />
           <path d="M4 21c0-4 4-6 8-6s8 2 8 6" />
@@ -294,6 +316,40 @@
     </div>
     <div id="wishContent"></div>
   </div>
+
+  <!-- ===== Checkout Sheet ===== -->
+  <div class="sheet" id="checkoutSheet">
+    <div class="sheet-handle"></div>
+    <div class="sheet-header">
+      <h3>Checkout</h3>
+      <button class="close-x" aria-label="Close" onclick="closeAllSheets()">✕</button>
+    </div>
+    <div id="checkoutContent"></div>
+  </div>
+
+  <!-- ===== Order Success Sheet ===== -->
+  <div class="sheet" id="orderSuccessSheet">
+    <div class="sheet-handle"></div>
+    <div class="sheet-header">
+      <h3>Order Confirmed</h3>
+      <button class="close-x" aria-label="Close" onclick="closeAllSheets()">✕</button>
+    </div>
+    <div id="orderSuccessContent"></div>
+  </div>
+
+  <!-- ===== Admin / Owner Dashboard Sheet ===== -->
+  <div class="sheet" id="adminSheet">
+    <div class="sheet-handle"></div>
+    <div class="sheet-header">
+      <div style="display:flex; align-items:center; gap: 8px;">
+        <h3>Store Orders & Overview</h3>
+        <span class="admin-badge">Admin</span>
+      </div>
+      <button class="close-x" aria-label="Close" onclick="closeAllSheets()">✕</button>
+    </div>
+    <div id="adminContent" style="padding: 16px 20px 40px;"></div>
+  </div>
+
 
   <div class="toast" id="toast"></div>
 
