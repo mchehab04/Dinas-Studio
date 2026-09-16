@@ -72,30 +72,6 @@ const storageService = {
   saveWishlist(list) {
     try { localStorage.setItem('dinas_wishlist', JSON.stringify(Array.from(list))); } catch(e){}
   },
-  getOrders() {
-    try {
-      const data = localStorage.getItem('dinas_orders');
-      return data ? JSON.parse(data) : [];
-    } catch(e) { return []; }
-  },
-  saveOrder(order) {
-    try {
-      const orders = storageService.getOrders();
-      orders.unshift(order);
-      localStorage.setItem('dinas_orders', JSON.stringify(orders));
-      return order;
-    } catch(e) { return null; }
-  },
-  updateOrderStatus(orderId, newStatus) {
-    try {
-      const orders = storageService.getOrders();
-      const order = orders.find(o => o.id === orderId);
-      if(order) {
-        order.status = newStatus;
-        localStorage.setItem('dinas_orders', JSON.stringify(orders));
-      }
-    } catch(e){}
-  },
   getNotifyRequests() {
     try {
       const data = localStorage.getItem('dinas_notify_requests');
@@ -183,26 +159,33 @@ const apiService = {
     return true;
   },
   async createOrder(orderPayload) {
+    const { data: { user } } = await supabaseClient.auth.getUser();
     const randomNum = Math.floor(1000 + Math.random() * 9000);
     const order = {
       id: `DS-${randomNum}`,
-      date: new Date().toISOString(),
+      userId: user.id,
       displayDate: new Date().toLocaleDateString('en-AE', { day:'numeric', month:'short', year:'numeric' }),
       status: 'pending',
       ...orderPayload
     };
-    storageService.saveOrder(order);
-    return order;
+    const { data, error } = await supabaseClient.from('orders').insert(order).select().single();
+    if(error) throw error;
+    return data;
   },
-  getOrders() {
-    return storageService.getOrders();
+  async getOrders() {
+    const { data, error } = await supabaseClient.from('orders').select('*').order('date', { ascending: false });
+    if(error) { console.error(error); return []; }
+    return data;
   },
-  getCustomerOrders(email) {
-    if(!email) return [];
-    return storageService.getOrders().filter(o => o.customer && o.customer.email.toLowerCase() === email.toLowerCase());
+  async getCustomerOrders(userId) {
+    if(!userId) return [];
+    const { data, error } = await supabaseClient.from('orders').select('*').eq('userId', userId).order('date', { ascending: false });
+    if(error) { console.error(error); return []; }
+    return data;
   },
-  updateOrderStatus(orderId, status) {
-    storageService.updateOrderStatus(orderId, status);
+  async updateOrderStatus(orderId, status) {
+    const { error } = await supabaseClient.from('orders').update({ status }).eq('id', orderId);
+    if(error) console.error(error);
   }
 };
 
@@ -680,6 +663,14 @@ function openCheckout() {
     showToast("Your bag is empty");
     return;
   }
+  if(!state.user) {
+    closeAllSheets();
+    postAuthRedirect = 'checkout';
+    setAuthTab('signin');
+    openAccount();
+    showToast("Please sign in to checkout");
+    return;
+  }
   closeAllSheets();
   renderCheckout();
   openSheet('checkoutSheet');
@@ -817,7 +808,13 @@ async function placeOrder() {
     total
   };
 
-  const order = await apiService.createOrder(orderPayload);
+  let order;
+  try {
+    order = await apiService.createOrder(orderPayload);
+  } catch(e) {
+    showToast("Couldn't place your order — please try again");
+    return;
+  }
 
   state.bag = [];
   storageService.saveCart([]);
@@ -897,7 +894,7 @@ async function renderAccount(){
 
   if(state.user){
     title.textContent = "My Account";
-    const myOrders = await apiService.getCustomerOrders(state.user.email);
+    const myOrders = await apiService.getCustomerOrders(state.user.id);
 
     el.innerHTML = `
       <div class="account-hero">
