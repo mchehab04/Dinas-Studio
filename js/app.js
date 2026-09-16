@@ -400,6 +400,7 @@ function toggleWish(id){
     }
   }
   if(document.getElementById('wishSheet').classList.contains('open')) renderWishlist();
+  updateWishBadge();
   showToast(added ? "Saved to your favorites ♥" : "Removed from favorites");
 }
 
@@ -461,8 +462,10 @@ function renderProductDetail(){
   const pdImages = p.images || [];
   el.innerHTML = `
     <div class="pd-gallery">
-      <div class="pd-slide" style="${pdImages.length ? '' : `background:linear-gradient(150deg, ${a}, ${b});`}">
-        ${pdImages.length ? productMedia(p, currentSlide, 'contain') : dressSVG()}
+      <div class="pd-track" id="pdTrack" onscroll="syncSlideFromScroll()">
+        ${pdImages.length
+          ? pdImages.map((_,i)=>`<div class="pd-slide">${productMedia(p, i, 'contain')}</div>`).join('')
+          : `<div class="pd-slide" style="background:linear-gradient(150deg, ${a}, ${b});">${dressSVG()}</div>`}
       </div>
       ${pdImages.length > 1 ? `
       <div class="pd-dots">
@@ -515,9 +518,21 @@ function renderProductDetail(){
   `;
 }
 function setSlide(i){
+  const track = document.getElementById('pdTrack');
+  if(track) track.scrollTo({ left: i * track.clientWidth, behavior: 'smooth' });
+  markSlide(i);
+}
+
+// The track is the source of truth once it scrolls, so swiping and the dots
+// stay in agreement without either driving the other.
+function syncSlideFromScroll(){
+  const track = document.getElementById('pdTrack');
+  if(!track || !track.clientWidth) return;
+  markSlide(Math.round(track.scrollLeft / track.clientWidth));
+}
+
+function markSlide(i){
   currentSlide = i;
-  const slideEl = document.querySelector('.pd-slide');
-  if(slideEl) slideEl.innerHTML = productMedia(currentProduct, i, 'contain');
   document.querySelectorAll('.pd-dot').forEach((dot, idx)=>dot.classList.toggle('active', idx===i));
 }
 function selectSize(s){
@@ -573,6 +588,12 @@ function updateBagBadge(){
       b.textContent = count;
     }
   });
+}
+function updateWishBadge(){
+  const b = document.getElementById('wishBadge');
+  if(!b) return;
+  b.style.display = state.wishlist.size>0 ? 'flex':'none';
+  b.textContent = state.wishlist.size;
 }
 function bagQtyChange(idx, d){
   state.bag[idx].qty += d;
@@ -671,6 +692,7 @@ function renderCheckout() {
 
   const defaultName = state.user ? state.user.name : "";
   const defaultEmail = state.user ? state.user.email : "";
+  const defaultPhone = (state.user && state.user.phone) ? state.user.phone : "";
 
   el.innerHTML = `
     <div class="checkout-section">
@@ -682,16 +704,19 @@ function renderCheckout() {
       <h4 style="margin-top:0;">Contact Details</h4>
       <div class="form-group">
         <label class="form-label" for="coName">Full Name *</label>
-        <input class="form-input" id="coName" placeholder="e.g. Dina Amari" value="${defaultName}">
+        <input class="form-input" id="coName" placeholder="e.g. Dina Amari" value="${defaultName}" autocomplete="name">
+        <div class="field-error" id="coNameErr"></div>
       </div>
       <div class="form-row-2">
         <div class="form-group">
           <label class="form-label" for="coEmail">Email Address *</label>
-          <input class="form-input" id="coEmail" type="email" placeholder="you@email.com" value="${defaultEmail}">
+          <input class="form-input" id="coEmail" type="email" placeholder="you@email.com" value="${defaultEmail}" autocomplete="email">
+          <div class="field-error" id="coEmailErr"></div>
         </div>
         <div class="form-group">
           <label class="form-label" for="coPhone">Phone / WhatsApp *</label>
-          <input class="form-input" id="coPhone" type="tel" placeholder="+971 50 123 4567">
+          <input class="form-input" id="coPhone" type="tel" placeholder="050 123 4567" value="${defaultPhone}" autocomplete="tel">
+          <div class="field-error" id="coPhoneErr"></div>
         </div>
       </div>
 
@@ -710,11 +735,14 @@ function renderCheckout() {
       </div>
       <div class="form-group">
         <label class="form-label" for="coAddress">Street & Villa / Apartment *</label>
-        <input class="form-input" id="coAddress" placeholder="e.g. Villa 14, Al Wasl Road, Jumeirah 2">
+        <input class="form-input" id="coAddress" placeholder="e.g. Villa 14, Al Wasl Road, Jumeirah 2" maxlength="120" autocomplete="street-address">
+        <div class="char-count" id="coAddressCount"></div>
+        <div class="field-error" id="coAddressErr"></div>
       </div>
       <div class="form-group">
         <label class="form-label" for="coNotes">Delivery Instructions (Optional)</label>
-        <input class="form-input" id="coNotes" placeholder="e.g. Ring bell or leave with concierge">
+        <input class="form-input" id="coNotes" placeholder="e.g. Ring bell or leave with concierge" maxlength="200">
+        <div class="char-count" id="coNotesCount"></div>
       </div>
 
       <h4>Payment Method</h4>
@@ -735,11 +763,14 @@ function renderCheckout() {
         <div class="sum-row total"><span>Total</span><span>${formatPrice(total)}</span></div>
       </div>
 
-      <button class="primary-btn" style="width:100%; margin-top:16px; padding:15px;" onclick="placeOrder()">
+      <button class="primary-btn" id="coSubmit" style="width:100%; margin-top:16px; padding:15px;" onclick="placeOrder()" disabled>
         Place Order (${formatPrice(total)})
       </button>
     </div>
   `;
+
+  touchedFields = new Set();
+  wireForm('checkout');
 }
 
 async function placeOrder() {
@@ -750,8 +781,12 @@ async function placeOrder() {
   const address = document.getElementById('coAddress').value.trim();
   const notes = document.getElementById('coNotes') ? document.getElementById('coNotes').value.trim() : "";
 
-  if(!name || !email || !phone || !address) {
-    showToast("Please fill in all required fields *");
+  // The button is disabled until the form validates; this is the backstop for
+  // anything that enables it out from under us.
+  if(!formIsValid('checkout')) {
+    CHECKOUT_FIELDS.forEach(f => touchedFields.add(f.id));
+    CHECKOUT_FIELDS.forEach(f => validateField('checkout', f.id));
+    showToast("Please fix the highlighted fields");
     return;
   }
 
@@ -775,7 +810,7 @@ async function placeOrder() {
   const total = subtotal + shipping;
 
   const orderPayload = {
-    customer: { name, email, phone },
+    customer: { name, email, phone: phoneE164(phone) },
     shippingAddress: { emirate, address, notes },
     paymentMethod: state.paymentMethod,
     items,
@@ -795,10 +830,20 @@ async function placeOrder() {
   state.bag = [];
   storageService.saveCart([]);
   updateBagBadge();
+  await rememberPhone(orderPayload.customer.phone);
 
   closeAllSheets();
   renderOrderSuccess(order);
   openSheet('orderSuccessSheet');
+}
+
+// Checkout is the only place a phone number is captured, so the first order
+// is what lets later ones pre-fill it.
+async function rememberPhone(phone){
+  if(!state.user || !phone || state.user.phone === phone) return;
+  const { error } = await supabaseClient.from('profiles').update({ phone }).eq('id', state.user.id);
+  if(error) { console.error(error); return; }
+  state.user.phone = phone;
 }
 
 function renderOrderSuccess(order) {
@@ -854,6 +899,147 @@ function renderOrderSuccess(order) {
       </div>
     </div>
   `;
+}
+
+/* ========================= FORM VALIDATION ========================= */
+const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+
+// Accepts however someone types a UAE number — spaces, dashes, brackets, a
+// +971/00971 prefix, or a bare local 05x — and reduces it to plain local
+// digits. Validation runs on this, never the raw text, so nobody is rejected
+// for formatting.
+function normalizePhone(raw){
+  let d = String(raw || '').replace(/[^\d+]/g, '');
+  d = d.replace(/^00/, '+');
+  if(d.startsWith('+971')) d = '0' + d.slice(4);
+  else if(d.startsWith('971')) d = '0' + d.slice(3);
+  d = d.replace(/\D/g, '');
+  if(d && !d.startsWith('0')) d = '0' + d;
+  return d;
+}
+function isValidPhone(raw){
+  return /^0\d{8,9}$/.test(normalizePhone(raw));
+}
+// Stored in international form so the number is unambiguous later.
+function phoneE164(raw){
+  const d = normalizePhone(raw);
+  return d ? '+971' + d.slice(1) : '';
+}
+
+const PW_RULES = [
+  { label: 'At least 8 characters',          test: v => v.length >= 8 },
+  { label: 'One capital letter',             test: v => /[A-Z]/.test(v) },
+  { label: 'One number or special character', test: v => /\d/.test(v) || /[^A-Za-z0-9]/.test(v) }
+];
+function passwordMeetsRules(v){ return PW_RULES.every(r => r.test(v)); }
+
+function warnIcon(){
+  return `<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><circle cx="12" cy="12" r="10"/><path d="M12 8v5M12 16.5v.01"/></svg>`;
+}
+
+const CHECKOUT_FIELDS = [
+  { id:'coName',    validate: v => v.trim() ? null : 'Please enter your full name' },
+  { id:'coEmail',   validate: v => !v.trim() ? 'Please enter your email address'
+                                : EMAIL_RE.test(v.trim()) ? null : 'Enter a valid email, like you@email.com' },
+  { id:'coPhone',   validate: v => !v.trim() ? 'Please enter a phone number'
+                                : isValidPhone(v) ? null : 'Enter a UAE number, like 050 123 4567' },
+  { id:'coAddress', validate: v => v.trim() ? null : 'Please enter your street and villa / apartment', max:120 },
+  { id:'coNotes',   validate: () => null, max:200 }
+];
+
+function authFields(){
+  return [
+    { id:'authEmail', validate: v => !v.trim() ? 'Please enter your email address'
+                                   : EMAIL_RE.test(v.trim()) ? null : 'Enter a valid email, like you@email.com' },
+    { id:'authPass',  validate: v => authTab === 'signup'
+                                   ? (passwordMeetsRules(v) ? null : 'Password needs to meet every requirement below')
+                                   : (v ? null : 'Please enter your password') }
+  ];
+}
+
+function fieldsFor(form){ return form === 'auth' ? authFields() : CHECKOUT_FIELDS; }
+
+// A field stays quiet until it has been left once, so nobody is told their
+// half-typed email is wrong while they are still typing it.
+let touchedFields = new Set();
+
+function validateField(form, id){
+  const field = fieldsFor(form).find(f => f.id === id);
+  const input = document.getElementById(id);
+  if(!field || !input) return true;
+  const err = field.validate(input.value);
+  const show = !!err && touchedFields.has(id);
+  input.classList.toggle('invalid', show);
+  input.classList.toggle('valid', !err && touchedFields.has(id) && input.value.trim() !== '');
+  const errEl = document.getElementById(id + 'Err');
+  if(errEl) errEl.innerHTML = show ? `${warnIcon()}<span>${err}</span>` : '';
+  return !err;
+}
+
+function formIsValid(form){
+  return fieldsFor(form).every(f => {
+    const input = document.getElementById(f.id);
+    return !input || !f.validate(input.value);
+  });
+}
+
+function refreshSubmit(form){
+  const btn = document.getElementById(form === 'auth' ? 'authSubmit' : 'coSubmit');
+  if(btn) btn.disabled = !formIsValid(form);
+}
+
+function updateCharCount(field){
+  if(!field.max) return;
+  const input = document.getElementById(field.id);
+  const el = document.getElementById(field.id + 'Count');
+  if(!input || !el) return;
+  el.textContent = `${input.value.length}/${field.max}`;
+  el.classList.toggle('near', input.value.length >= field.max * 0.9);
+}
+
+function renderPwRules(){
+  const el = document.getElementById('pwRules');
+  const input = document.getElementById('authPass');
+  if(!el || !input) return;
+  const v = input.value;
+  el.innerHTML = PW_RULES.map(r => `
+    <li class="${r.test(v) ? 'met' : ''}">
+      <span class="pw-check">${r.test(v) ? '✓' : ''}</span>${r.label}
+    </li>`).join('');
+}
+
+// Called after each render, since both forms are rebuilt via innerHTML and
+// lose their listeners every time.
+function wireForm(form){
+  fieldsFor(form).forEach(field => {
+    const input = document.getElementById(field.id);
+    if(!input) return;
+    updateCharCount(field);
+    input.addEventListener('blur', () => {
+      touchedFields.add(field.id);
+      validateField(form, field.id);
+      refreshSubmit(form);
+    });
+    input.addEventListener('input', () => {
+      if(touchedFields.has(field.id)) validateField(form, field.id);
+      updateCharCount(field);
+      if(form === 'auth' && field.id === 'authPass') renderPwRules();
+      refreshSubmit(form);
+    });
+    if(form === 'auth'){
+      input.addEventListener('keydown', e => {
+        if(e.key !== 'Enter') return;
+        e.preventDefault();
+        if(formIsValid('auth')) handleAuthSubmit();
+        else {
+          // Surface whatever is still missing rather than doing nothing.
+          fieldsFor('auth').forEach(f => touchedFields.add(f.id));
+          fieldsFor('auth').forEach(f => validateField('auth', f.id));
+        }
+      });
+    }
+  });
+  refreshSubmit(form);
 }
 
 /* ========================= ACCOUNT & AUTH ========================= */
@@ -923,11 +1109,24 @@ async function renderAccount(){
       ${authTab==='signup' ? `
       <div class="field"><label>Full Name</label><input id="authName" placeholder="Dina Amari"></div>
       ` : ``}
-      <div class="field"><label>Email</label><input id="authEmail" type="email" placeholder="you@email.com"></div>
-      <div class="field"><label>Password</label><input id="authPass" type="password" placeholder="••••••••"></div>
-      <button class="primary-btn" style="width:100%;" onclick="handleAuthSubmit()">${authTab==='signin' ? 'Sign In' : 'Create Account'}</button>
+      <div class="field">
+        <label>Email *</label>
+        <input id="authEmail" type="email" placeholder="you@email.com" autocomplete="email">
+        <div class="field-error" id="authEmailErr"></div>
+      </div>
+      <div class="field">
+        <label>Password *</label>
+        <input id="authPass" type="password" placeholder="••••••••" autocomplete="${authTab==='signup'?'new-password':'current-password'}">
+        <div class="field-error" id="authPassErr"></div>
+        ${authTab==='signup' ? `<ul class="pw-rules" id="pwRules"></ul>` : ``}
+      </div>
+      <button class="primary-btn" id="authSubmit" style="width:100%;" onclick="handleAuthSubmit()" disabled>${authTab==='signin' ? 'Sign In' : 'Create Account'}</button>
     </div>
   `;
+
+  touchedFields = new Set();
+  if(authTab === 'signup') renderPwRules();
+  wireForm('auth');
 }
 
 async function handleAuthSubmit(){
@@ -1287,6 +1486,7 @@ async function initApp() {
   renderFilterPanel();
   renderGrid();
   updateBagBadge();
+  updateWishBadge();
   routeAdminHash();
 }
 
@@ -1303,6 +1503,11 @@ async function routeAdminHash() {
     await openAdmin();
   } else {
     showToast("Not authorized");
+    // replaceState rather than clearing the hash: it drops #admin without
+    // firing another hashchange, and leaves no history entry for Back to
+    // return them to.
+    history.replaceState(null, '', location.pathname + location.search);
+    setView('shop');
   }
 }
 
