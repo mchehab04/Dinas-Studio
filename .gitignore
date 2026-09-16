@@ -14,3 +14,6 @@ Thumbs.db
 
 # Raw/unprocessed source images (not used by the site)
 data/images/originals/
+
+# Local Claude Code config
+.claude/
