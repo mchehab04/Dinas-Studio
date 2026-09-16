@@ -74,8 +74,20 @@ function productMedia(p, idx=0, fit='cover'){
   const style = fit === 'contain'
     ? 'position:relative; width:auto; max-width:100%; height:100%; object-fit:contain; border-radius:var(--radius-md); display:block;'
     : 'position:absolute; inset:0; width:100%; height:100%; object-fit:cover; display:block;';
-  return `<img src="${src}" alt="${p.name}" loading="lazy" style="${style}">`;
+  // Only the cropped thumbnail boxes are small enough to want the -sm variant;
+  // the detail gallery is large, so it always takes -lg.
+  const sm = fit === 'contain' ? null : smallVariant(src);
+  const srcset = sm ? ` srcset="${sm} 600w, ${src} 1200w" sizes="(max-width:640px) 50vw, 300px"` : '';
+  return `<img src="${src}" alt="${p.name}" loading="lazy"${srcset} style="${style}">`;
 }
+// Uploaded photos are stored as a -lg/-sm pair. Where a URL follows that
+// convention the small variant can be offered to the browser for grid-sized
+// boxes; the seeded products point at repo JPEGs with no pair, so they get no
+// srcset and render exactly as before.
+function smallVariant(src){
+  return /-lg\.webp($|\?)/.test(src) ? src.replace('-lg.webp', '-sm.webp') : null;
+}
+
 function productThumbStyle(p, idx=0){
   return (p.images && p.images[idx]) ? '' : gradientStyle(p);
 }
@@ -171,12 +183,26 @@ const apiService = {
         fabric: productData.fabric || "Premium Crepe / Silk Blend",
         pop: 85,
         paletteIndex: productData.paletteIndex,
+        images: productData.images || [],
         nw: true
       })
       .select()
       .single();
     if(error) { console.error(error); return null; }
     PRODUCTS.unshift(data);
+    storageService.saveProducts(PRODUCTS);
+    return data;
+  },
+  async updateProductImages(id, images) {
+    const { data, error } = await supabaseClient
+      .from('products')
+      .update({ images })
+      .eq('id', id)
+      .select()
+      .single();
+    if(error) { console.error(error); return null; }
+    const idx = PRODUCTS.findIndex(x => x.id === id);
+    if(idx !== -1) PRODUCTS[idx] = data;
     storageService.saveProducts(PRODUCTS);
     return data;
   },
@@ -985,6 +1011,56 @@ function renderOrderSuccess(order) {
   `;
 }
 
+/* ========================= PRODUCT PHOTOS ========================= */
+const PHOTO_BUCKET = 'product-images';
+const MAX_PHOTOS = 4;
+const MAX_SOURCE_BYTES = 10 * 1024 * 1024;
+// Sized against what the layout actually displays at 2x, not round numbers: grid
+// cards are ~180px wide and the detail gallery is 38vh (~320px tall on a phone).
+// Quality stays at 0.8 rather than lower — the fabric texture is the product
+// here, and it is the first thing aggressive WebP smears.
+const PHOTO_SIZES = [
+  { suffix: 'sm', edge: 500, quality: 0.78 },
+  { suffix: 'lg', edge: 900, quality: 0.80 }
+];
+
+// Never upscales: a photo smaller than the target keeps its own dimensions.
+async function resizeToWebp(file, edge, quality){
+  const bitmap = await createImageBitmap(file);
+  const scale = Math.min(1, edge / Math.max(bitmap.width, bitmap.height));
+  const canvas = document.createElement('canvas');
+  canvas.width = Math.round(bitmap.width * scale);
+  canvas.height = Math.round(bitmap.height * scale);
+  canvas.getContext('2d').drawImage(bitmap, 0, 0, canvas.width, canvas.height);
+  bitmap.close();
+  const blob = await new Promise(res => canvas.toBlob(res, 'image/webp', quality));
+  if(!blob) throw new Error('Could not convert image');
+  return blob;
+}
+
+function photoRejection(file){
+  if(!file.type.startsWith('image/')) return `"${file.name}" isn't an image`;
+  if(file.size > MAX_SOURCE_BYTES) return `"${file.name}" is over 10MB`;
+  return null;
+}
+
+// Uploads both variants and returns the -lg URL, which is what the product row
+// stores; the -sm one is found later by swapping the suffix.
+async function uploadPhoto(file, folder, index){
+  let lgUrl = null;
+  for(const { suffix, edge, quality } of PHOTO_SIZES){
+    const blob = await resizeToWebp(file, edge, quality);
+    const path = `${folder}/${index}-${suffix}.webp`;
+    const { error } = await supabaseClient.storage.from(PHOTO_BUCKET)
+      .upload(path, blob, { contentType: 'image/webp', upsert: true });
+    if(error) throw new Error(`${file.name}: ${error.message}`);
+    if(suffix === 'lg'){
+      lgUrl = supabaseClient.storage.from(PHOTO_BUCKET).getPublicUrl(path).data.publicUrl;
+    }
+  }
+  return lgUrl;
+}
+
 /* ========================= FORM VALIDATION ========================= */
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
@@ -1343,7 +1419,92 @@ async function signOut(){
 }
 
 /* ========================= STORE OWNER & INVENTORY DASHBOARD ========================= */
-let adminTab = "orders"; // "orders" | "inventory" | "add"
+let adminTab = "orders"; // "orders" | "inventory" | "add" | "photos"
+
+// The photo picker is shared by "Add Piece" and the per-product editor. Items
+// are either { url } for something already in the bucket, or { file, preview }
+// for a pick not yet uploaded.
+let photoDraft = [];
+let photoEditProduct = null;   // set only in the "photos" tab
+let photoBusy = false;
+
+function renderPhotoPicker(){
+  return `
+    <div class="photo-picker">
+      <label class="form-label">Photos (up to ${MAX_PHOTOS})</label>
+      <div class="photo-grid" id="photoGrid">${photoThumbs()}</div>
+      <input type="file" id="photoInput" accept="image/*" multiple hidden onchange="onPhotosPicked(event)">
+      <button type="button" class="filter-btn" id="photoAddBtn"
+        onclick="document.getElementById('photoInput').click()"
+        ${photoDraft.length >= MAX_PHOTOS ? 'disabled' : ''}>+ Add photos</button>
+      <div class="photo-hint" id="photoHint">First photo is used as the thumbnail.</div>
+    </div>`;
+}
+
+function photoThumbs(){
+  if(photoDraft.length === 0) return `<div class="photo-empty">No photos yet</div>`;
+  return photoDraft.map((item, i) => `
+    <div class="photo-thumb">
+      <img src="${item.url || item.preview}" alt="Photo ${i+1}">
+      ${i === 0 ? `<span class="photo-badge">Thumbnail</span>` : ''}
+      <button type="button" class="photo-remove" aria-label="Remove photo ${i+1}"
+        onclick="removePhoto(${i})">×</button>
+    </div>`).join('');
+}
+
+function refreshPhotoGrid(){
+  const grid = document.getElementById('photoGrid');
+  if(grid) grid.innerHTML = photoThumbs();
+  const btn = document.getElementById('photoAddBtn');
+  if(btn) btn.disabled = photoDraft.length >= MAX_PHOTOS || photoBusy;
+}
+
+function onPhotosPicked(e){
+  const picked = Array.from(e.target.files || []);
+  e.target.value = '';  // so picking the same file twice still fires change
+  const room = MAX_PHOTOS - photoDraft.length;
+  if(picked.length > room){ showToast(`You can add ${room} more photo${room === 1 ? '' : 's'}`); }
+  for(const file of picked.slice(0, room)){
+    const problem = photoRejection(file);
+    if(problem){ showToast(problem); continue; }
+    photoDraft.push({ file, preview: URL.createObjectURL(file) });
+  }
+  refreshPhotoGrid();
+}
+
+function removePhoto(i){
+  const [gone] = photoDraft.splice(i, 1);
+  if(gone && gone.preview) URL.revokeObjectURL(gone.preview);
+  refreshPhotoGrid();
+}
+
+function setPhotoBusy(on, message){
+  photoBusy = on;
+  const hint = document.getElementById('photoHint');
+  if(hint) hint.textContent = message || 'First photo is used as the thumbnail.';
+  refreshPhotoGrid();
+}
+
+// Uploads anything not yet in the bucket and returns the full ordered URL list.
+// Nothing is written to the product until every upload succeeds, so a product
+// is never published with half a gallery.
+async function commitPhotos(folder){
+  const urls = [];
+  for(let i = 0; i < photoDraft.length; i++){
+    const item = photoDraft[i];
+    if(item.url){ urls.push(item.url); continue; }
+    setPhotoBusy(true, `Uploading photo ${i + 1} of ${photoDraft.length}…`);
+    urls.push(await uploadPhoto(item.file, folder, i));
+  }
+  setPhotoBusy(false);
+  return urls;
+}
+
+function openPhotoEditor(productId){
+  photoEditProduct = PRODUCTS.find(p => p.id === productId) || null;
+  photoDraft = (photoEditProduct && photoEditProduct.images || []).map(url => ({ url }));
+  setAdminTab('photos');
+}
 let newProductPaletteIndex = 0;
 
 async function openAdmin() {
@@ -1353,6 +1514,14 @@ async function openAdmin() {
 }
 
 async function setAdminTab(tab) {
+  // Leaving the picker behind discards unsaved picks rather than carrying them
+  // into the next piece. The photos tab is the exception: openPhotoEditor fills
+  // the draft before switching to it.
+  if(tab !== 'photos'){
+    photoDraft.forEach(item => item.preview && URL.revokeObjectURL(item.preview));
+    photoDraft = [];
+    photoBusy = false;
+  }
   adminTab = tab;
   await renderAdmin();
 }
@@ -1469,6 +1638,7 @@ async function renderAdmin() {
               <button class="stock-toggle-btn ${p.stock==='in'?'active-in':''}" onclick="setProductStock(${p.id}, 'in')">In Stock</button>
               <button class="stock-toggle-btn ${p.stock==='low'?'active-low':''}" onclick="setProductStock(${p.id}, 'low')">Low</button>
               <button class="stock-toggle-btn ${p.stock==='out'?'active-out':''}" onclick="setProductStock(${p.id}, 'out')">Sold Out</button>
+              <button class="stock-toggle-btn" onclick="openPhotoEditor(${p.id})">Photos (${(p.images||[]).length})</button>
             </div>
           </div>
         `).join('')}
@@ -1478,6 +1648,8 @@ async function renderAdmin() {
     bodyContent = `
       <div style="background:var(--surface); border:1px solid var(--line); border-radius:var(--radius-md); padding:16px;">
         <h3 style="font-size:16px; margin:0 0 14px; color:var(--ink);">Add New Piece to Collection</h3>
+
+        ${renderPhotoPicker()}
 
         <div class="form-group">
           <label class="form-label" for="npName">Piece Name *</label>
@@ -1531,11 +1703,26 @@ async function renderAdmin() {
           </div>
         </div>
 
-        <button class="primary-btn" style="width:100%; margin-top:16px; padding:14px;" onclick="saveNewProduct()">
+        <button class="primary-btn" id="npPublish" style="width:100%; margin-top:16px; padding:14px;" onclick="saveNewProduct()">
           Publish to Storefront
         </button>
       </div>
     `;
+  } else if(adminTab === 'photos') {
+    const p = photoEditProduct;
+    bodyContent = p ? `
+      <div style="background:var(--surface); border:1px solid var(--line); border-radius:var(--radius-md); padding:16px;">
+        <h3 style="font-size:16px; margin:0 0 4px; color:var(--ink);">Photos</h3>
+        <p style="font-size:13px; color:var(--ink-soft); margin:0 0 14px;">${p.name}</p>
+
+        ${renderPhotoPicker()}
+
+        <button class="primary-btn" id="photoSave" style="width:100%; margin-top:16px; padding:14px;" onclick="savePhotos()">
+          Save Photos
+        </button>
+        <button class="filter-btn" style="width:100%; margin-top:8px;" onclick="setAdminTab('inventory')">Back to Inventory</button>
+      </div>
+    ` : `<p style="font-size:13px; color:var(--ink-soft);">No piece selected.</p>`;
   }
 
   el.innerHTML = `
@@ -1553,6 +1740,32 @@ async function renderAdmin() {
 function selectPalette(idx) {
   newProductPaletteIndex = idx;
   renderAdmin();
+}
+
+async function savePhotos(){
+  const p = photoEditProduct;
+  if(!p) return;
+  const btn = document.getElementById('photoSave');
+  if(btn) btn.disabled = true;
+  try {
+    const images = await commitPhotos(String(p.id));
+    const updated = await apiService.updateProductImages(p.id, images);
+    if(!updated) throw new Error('Could not save photos');
+    showToast(`Photos updated for "${p.name}" ✓`);
+    photoDraft = [];
+    photoEditProduct = null;
+    await setAdminTab('inventory');
+    renderGrid();
+    if(currentProduct && currentProduct.id === p.id){
+      currentProduct.images = images;
+      renderProductDetail();
+    }
+  } catch(e) {
+    console.error(e);
+    setPhotoBusy(false);
+    showToast(e.message || 'Upload failed — please try again');
+    if(btn) btn.disabled = false;
+  }
 }
 
 async function setProductStock(productId, stockStatus) {
@@ -1580,6 +1793,22 @@ async function saveNewProduct() {
     return;
   }
 
+  const btn = document.getElementById('npPublish');
+  if(btn) btn.disabled = true;
+
+  let images;
+  try {
+    // Photos go up before the row is written, so a product is never published
+    // with a gallery that only half uploaded.
+    images = await commitPhotos(crypto.randomUUID());
+  } catch(e) {
+    console.error(e);
+    setPhotoBusy(false);
+    showToast(e.message || 'Upload failed — please try again');
+    if(btn) btn.disabled = false;
+    return;
+  }
+
   const newP = await apiService.addProduct({
     name,
     cat,
@@ -1587,10 +1816,16 @@ async function saveNewProduct() {
     stock,
     fabric,
     desc,
+    images,
     paletteIndex: newProductPaletteIndex
   });
 
-  if(!newP) { showToast("Failed to publish — please try again"); return; }
+  if(!newP) {
+    showToast("Failed to publish — please try again");
+    if(btn) btn.disabled = false;
+    return;
+  }
+  photoDraft = [];
   showToast(`"${name}" published to storefront ✓`);
   await setAdminTab('inventory');
   renderGrid();

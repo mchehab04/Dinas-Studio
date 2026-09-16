@@ -16,14 +16,18 @@
 
 A browse currently pulls **4.1 MB**, almost entirely images averaging 213 KB, displayed in grid cards about 180px wide. Uploading originals untouched would make that worse with every piece added. Converting before upload means the pipeline that unblocks the admin form is also the one that fixes the payload problem, rather than something to redo later.
 
-Two variants are produced per photo:
+Two variants are produced per photo, sized against what the layout actually displays at 2× rather than round numbers — grid cards are about 180px wide, and the detail gallery is 38vh, roughly 320px tall on a phone:
 
-| Variant | Long edge | Used by |
-|---|---|---|
-| `-sm` | 600px | grid cards, cart and wishlist thumbnails |
-| `-lg` | 1200px | product detail gallery |
+| Variant | Long edge | Quality | Used by |
+|---|---|---|---|
+| `-sm` | 500px | 0.78 | grid cards, cart and wishlist thumbnails |
+| `-lg` | 900px | 0.80 | product detail gallery |
 
-Both WebP at quality 0.82. A 213 KB JPEG typically lands around 60–90 KB at `-lg` and 20–30 KB at `-sm`.
+Measured on the existing catalogue: a 451 KB source becomes **206 KB** at `-lg` and **67 KB** at `-sm`. Since the grid loads only `-sm`, that is roughly a 70% cut to the 4.1 MB browse once products are migrated.
+
+Quality stays at 0.8 rather than going lower. Dropping `-lg` to 0.72 saves a further 38 KB, but this is a fashion catalogue where crinkled cotton and silk jacquard texture *is* the product, and fabric detail is the first thing aggressive WebP smears.
+
+Note the existing photos are already modest (960×1280, 1279×1600), so `-lg` barely downscales them and most of its saving comes from re-encoding. The meaningful win is `-sm` in the grid, where 17 images load.
 
 ## Storage
 
