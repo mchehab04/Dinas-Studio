@@ -6,8 +6,54 @@ const PALETTES = [
   ["#8A6B63","#6B4D45"], ["#D97C8B","#832D8C"], ["#E4B8A0","#C58B6B"]
 ];
 
+// The dirham is pegged to the dollar, fixed since 1997 — a constant, not a rate
+// that needs refreshing. AED is the only currency ever stored; USD is display.
+const AED_PER_USD = 3.6725;
+
+const COUNTRIES = {
+  AE: {
+    name: "United Arab Emirates",
+    regionLabel: "Emirate",
+    regions: ["Dubai","Abu Dhabi","Sharjah","Ajman","Ras Al Khaimah","Fujairah","Umm Al Quwain"],
+    shipping: 25,
+    freeOver: 350,
+    delivery: "1–2 business days",
+    cod: true,
+    dial: "971",
+    localDigits: [9, 10],
+    phoneExample: "050 123 4567",
+    addressExample: "e.g. Villa 14, Al Wasl Road, Jumeirah 2"
+  },
+  LB: {
+    name: "Lebanon",
+    regionLabel: "Governorate",
+    regions: ["Beirut","Mount Lebanon","North","Akkar","Bekaa","Baalbek-Hermel","South","Nabatieh"],
+    shipping: 10.98,  // $2.99 at the peg
+    freeOver: 551,    // $150 at the peg
+    delivery: "3–5 business days",
+    cod: false,       // shipped from local stock, settled by Whish transfer
+    dial: "961",
+    // 8 covers landlines and the 03 mobile prefix; 9 covers 70/71/76/78/79/81.
+    localDigits: [8, 9],
+    phoneExample: "03 123 456",
+    addressExample: "e.g. Hamra Street, Bldg 12, Floor 3"
+  }
+};
+// Orders placed before Lebanon existed carry no country and stored the region
+// under `emirate`; they were all UAE, so both fall back rather than render blank.
+function countryOf(code){ return COUNTRIES[code] || COUNTRIES.AE; }
+function regionOf(order){
+  const a = (order && order.shippingAddress) || {};
+  return a.region || a.emirate || '';
+}
+
 function formatPrice(amount) {
-  return `AED ${amount}`;
+  return `AED ${amount} · $${(amount / AED_PER_USD).toFixed(2)}`;
+}
+
+function shippingFor(subtotal, countryCode){
+  const c = countryOf(countryCode);
+  return subtotal >= c.freeOver ? 0 : c.shipping;
 }
 
 // Hollow by default; .active on the containing button fills it (see .wish-btn.active / .heart-toggle.active).
@@ -190,7 +236,8 @@ let state = {
   filterAvail: new Set(),
   filtersOpen: false,
   tab: "shop",
-  paymentMethod: "cod"
+  paymentMethod: "cod",
+  country: "AE"
 };
 
 let postAuthRedirect = null; // null | 'checkout' | 'admin' — set before sending someone to sign in
@@ -510,7 +557,7 @@ function renderProductDetail(){
         </div>
         <div class="spec-item">
           <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="1" y="3" width="15" height="13"/><polygon points="16 8 20 8 23 11 23 16 16 16 16 8"/><circle cx="5.5" cy="18.5" r="2.5"/><circle cx="18.5" cy="18.5" r="2.5"/></svg>
-          Delivery in 1–2 business days across the UAE
+          Delivery in ${COUNTRIES.AE.delivery} in the UAE · ${COUNTRIES.LB.delivery} in Lebanon
         </div>
       </div>
     </div>
@@ -645,14 +692,14 @@ function renderBag(){
     `;
   }).join('');
 
-  const shipping = subtotal >= 350 ? 0 : 25;
+  const shipping = shippingFor(subtotal, state.country);
   const total = subtotal + shipping;
 
   el.innerHTML = itemsHtml + `
     <div class="bag-summary">
       <div class="sum-row"><span>Subtotal</span><span>${formatPrice(subtotal)}</span></div>
-      <div class="sum-row"><span>UAE Delivery</span><span>${shipping===0?'Free':formatPrice(shipping)}</span></div>
-      ${shipping > 0 ? `<div style="font-size:11px; color:var(--ink-faint); margin-top:-6px; margin-bottom:6px;">Add ${formatPrice(350 - subtotal)} more for free delivery</div>` : ''}
+      <div class="sum-row"><span>Delivery</span><span>${shipping===0?'Free':formatPrice(shipping)}</span></div>
+      ${shipping > 0 ? `<div style="font-size:11px; color:var(--ink-faint); margin-top:-6px; margin-bottom:6px;">Add ${formatPrice(countryOf(state.country).freeOver - subtotal)} more for free delivery</div>` : ''}
       <div class="sum-row total"><span>Total</span><span>${formatPrice(total)}</span></div>
       <button class="primary-btn" style="width:100%; margin-top:14px;" onclick="openCheckout()">Proceed to Checkout</button>
     </div>
@@ -685,6 +732,30 @@ function setPaymentMethod(method) {
   });
 }
 
+// Country drives the region field, shipping and payment options at once, so the
+// whole form re-renders. Typed values are carried across rather than wiped —
+// the region resets deliberately, since last country's region is meaningless.
+function setCountry(code) {
+  if(!COUNTRIES[code]) return;
+  state.country = code;
+  if(!COUNTRIES[code].cod && state.paymentMethod === 'cod') state.paymentMethod = 'transfer';
+
+  const typed = {};
+  CHECKOUT_FIELDS.forEach(f => {
+    const el = document.getElementById(f.id);
+    if(el) typed[f.id] = el.value;
+  });
+
+  renderCheckout();
+
+  CHECKOUT_FIELDS.forEach(f => {
+    const el = document.getElementById(f.id);
+    if(el && typed[f.id] !== undefined) el.value = typed[f.id];
+    updateCharCount(f);
+  });
+  refreshSubmit('checkout');
+}
+
 function renderCheckout() {
   const el = document.getElementById('checkoutContent');
   let subtotal = 0;
@@ -692,8 +763,9 @@ function renderCheckout() {
     const p = PRODUCTS.find(x => x.id === item.productId);
     if(p) subtotal += p.price * item.qty;
   });
-  const shipping = subtotal >= 350 ? 0 : 25;
+  const shipping = shippingFor(subtotal, state.country);
   const total = subtotal + shipping;
+  const country = countryOf(state.country);
 
   const defaultName = state.user ? state.user.name : "";
   const defaultEmail = state.user ? state.user.email : "";
@@ -720,27 +792,28 @@ function renderCheckout() {
         </div>
         <div class="form-group">
           <label class="form-label" for="coPhone">Phone / WhatsApp *</label>
-          <input class="form-input" id="coPhone" type="tel" placeholder="050 123 4567" value="${defaultPhone}" autocomplete="tel">
+          <input class="form-input" id="coPhone" type="tel" placeholder="${country.phoneExample}" value="${defaultPhone}" autocomplete="tel">
           <div class="field-error" id="coPhoneErr"></div>
         </div>
       </div>
 
       <h4>Delivery Address</h4>
       <div class="form-group">
-        <label class="form-label" for="coEmirate">Emirate *</label>
-        <select class="form-select" id="coEmirate">
-          <option value="Dubai">Dubai</option>
-          <option value="Abu Dhabi">Abu Dhabi</option>
-          <option value="Sharjah">Sharjah</option>
-          <option value="Ajman">Ajman</option>
-          <option value="Ras Al Khaimah">Ras Al Khaimah</option>
-          <option value="Fujairah">Fujairah</option>
-          <option value="Umm Al Quwain">Umm Al Quwain</option>
+        <label class="form-label" for="coCountry">Country *</label>
+        <select class="form-select" id="coCountry" onchange="setCountry(this.value)">
+          ${Object.keys(COUNTRIES).map(code =>
+            `<option value="${code}" ${state.country===code?'selected':''}>${COUNTRIES[code].name}</option>`).join('')}
+        </select>
+      </div>
+      <div class="form-group">
+        <label class="form-label" for="coRegion">${country.regionLabel} *</label>
+        <select class="form-select" id="coRegion">
+          ${country.regions.map(r => `<option value="${r}">${r}</option>`).join('')}
         </select>
       </div>
       <div class="form-group">
         <label class="form-label" for="coAddress">Street & Villa / Apartment *</label>
-        <input class="form-input" id="coAddress" placeholder="e.g. Villa 14, Al Wasl Road, Jumeirah 2" maxlength="120" autocomplete="street-address">
+        <input class="form-input" id="coAddress" placeholder="${country.addressExample}" maxlength="120" autocomplete="street-address">
         <div class="char-count" id="coAddressCount"></div>
         <div class="field-error" id="coAddressErr"></div>
       </div>
@@ -752,10 +825,11 @@ function renderCheckout() {
 
       <h4>Payment Method</h4>
       <div class="payment-methods">
+        ${country.cod ? `
         <div class="payment-pill ${state.paymentMethod==='cod'?'active':''}" data-method="cod" onclick="setPaymentMethod('cod')">
           <div class="payment-pill-title">Cash on Delivery</div>
           <div class="payment-pill-sub">Pay courier in cash / card</div>
-        </div>
+        </div>` : ''}
         <div class="payment-pill ${state.paymentMethod==='transfer'?'active':''}" data-method="transfer" onclick="setPaymentMethod('transfer')">
           <div class="payment-pill-title">Bank Transfer</div>
           <div class="payment-pill-sub">Details sent on WhatsApp</div>
@@ -764,7 +838,7 @@ function renderCheckout() {
 
       <div class="bag-summary" style="padding:14px; margin-top:16px; border:1px solid var(--line); border-radius:var(--radius-sm); background:var(--surface);">
         <div class="sum-row"><span>Subtotal</span><span>${formatPrice(subtotal)}</span></div>
-        <div class="sum-row"><span>UAE Delivery</span><span>${shipping===0?'Free':formatPrice(shipping)}</span></div>
+        <div class="sum-row"><span>Delivery</span><span>${shipping===0?'Free':formatPrice(shipping)}</span></div>
         <div class="sum-row total"><span>Total</span><span>${formatPrice(total)}</span></div>
       </div>
 
@@ -782,7 +856,7 @@ async function placeOrder() {
   const name = document.getElementById('coName').value.trim();
   const email = document.getElementById('coEmail').value.trim();
   const phone = document.getElementById('coPhone').value.trim();
-  const emirate = document.getElementById('coEmirate').value;
+  const region = document.getElementById('coRegion').value;
   const address = document.getElementById('coAddress').value.trim();
   const notes = document.getElementById('coNotes') ? document.getElementById('coNotes').value.trim() : "";
 
@@ -811,12 +885,12 @@ async function placeOrder() {
     };
   });
 
-  const shipping = subtotal >= 350 ? 0 : 25;
+  const shipping = shippingFor(subtotal, state.country);
   const total = subtotal + shipping;
 
   const orderPayload = {
-    customer: { name, email, phone: phoneE164(phone) },
-    shippingAddress: { emirate, address, notes },
+    customer: { name, email, phone: phoneE164(phone, state.country) },
+    shippingAddress: { country: state.country, region, address, notes },
     paymentMethod: state.paymentMethod,
     items,
     subtotal,
@@ -881,7 +955,7 @@ function renderOrderSuccess(order) {
         </div>
         <div class="order-detail-row">
           <span>Delivery to:</span>
-          <strong>${order.shippingAddress.emirate}, UAE</strong>
+          <strong>${regionOf(order)}, ${countryOf(order.shippingAddress.country).name}</strong>
         </div>
         <div class="order-detail-row">
           <span>Address:</span>
@@ -901,7 +975,7 @@ function renderOrderSuccess(order) {
         </div>
       </div>
 
-      <p style="font-size:12px; color:var(--ink-faint); margin:12px 0 20px;">Estimated delivery: 1–2 business days. A courier will call prior to delivery.</p>
+      <p style="font-size:12px; color:var(--ink-faint); margin:12px 0 20px;">Estimated delivery: ${countryOf(order.shippingAddress.country).delivery}. A courier will call prior to delivery.</p>
 
       <div style="display:flex; flex-direction:column; gap:10px;">
         <button class="primary-btn" onclick="closeAllSheets()">Continue Shopping</button>
@@ -914,26 +988,49 @@ function renderOrderSuccess(order) {
 /* ========================= FORM VALIDATION ========================= */
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
-// Accepts however someone types a UAE number — spaces, dashes, brackets, a
-// +971/00971 prefix, or a bare local 05x — and reduces it to plain local
-// digits. Validation runs on this, never the raw text, so nobody is rejected
-// for formatting.
-function normalizePhone(raw){
-  let d = String(raw || '').replace(/[^\d+]/g, '');
-  d = d.replace(/^00/, '+');
-  if(d.startsWith('+971')) d = '0' + d.slice(4);
-  else if(d.startsWith('971')) d = '0' + d.slice(3);
-  d = d.replace(/\D/g, '');
-  if(d && !d.startsWith('0')) d = '0' + d;
-  return d;
+// Accepts however someone types a number — spaces, dashes, brackets, a +971 /
+// +961 / 00-prefixed international form, or a bare local one — and works out
+// which country it belongs to. Matching is by digit length rather than a list
+// of mobile prefixes, which would reject valid numbers as carriers add ranges.
+// A customer ordering to Lebanon may still carry a UAE number, so an explicit
+// country code always wins over whichever country is selected at checkout.
+function parsePhone(raw, selected){
+  const s = String(raw || '').replace(/[^\d+]/g, '').replace(/^00/, '+');
+  const toLocal = rest => {
+    const d = rest.replace(/\D/g, '');
+    return d ? (d.startsWith('0') ? d : '0' + d) : '';
+  };
+
+  for(const code of Object.keys(COUNTRIES)){
+    const dial = COUNTRIES[code].dial;
+    if(s.startsWith('+' + dial)) return { country: code, local: toLocal(s.slice(1 + dial.length)) };
+  }
+
+  const digits = s.replace(/\D/g, '');
+  for(const code of Object.keys(COUNTRIES)){
+    const { dial, localDigits } = COUNTRIES[code];
+    if(digits.startsWith(dial) && localDigits.includes(toLocal(digits.slice(dial.length)).length)){
+      return { country: code, local: toLocal(digits.slice(dial.length)) };
+    }
+  }
+
+  // A bare local number: prefer the selected country, else whichever length fits.
+  const local = toLocal(digits);
+  const order = [selected, ...Object.keys(COUNTRIES)];
+  for(const code of order){
+    if(COUNTRIES[code] && COUNTRIES[code].localDigits.includes(local.length)) return { country: code, local };
+  }
+  return { country: selected && COUNTRIES[selected] ? selected : 'AE', local };
 }
-function isValidPhone(raw){
-  return /^0\d{8,9}$/.test(normalizePhone(raw));
+
+function isValidPhone(raw, selected){
+  const { country, local } = parsePhone(raw, selected);
+  return /^0\d+$/.test(local) && COUNTRIES[country].localDigits.includes(local.length);
 }
 // Stored in international form so the number is unambiguous later.
-function phoneE164(raw){
-  const d = normalizePhone(raw);
-  return d ? '+971' + d.slice(1) : '';
+function phoneE164(raw, selected){
+  const { country, local } = parsePhone(raw, selected);
+  return local ? '+' + COUNTRIES[country].dial + local.slice(1) : '';
 }
 
 const PW_RULES = [
@@ -952,7 +1049,8 @@ const CHECKOUT_FIELDS = [
   { id:'coEmail',   validate: v => !v.trim() ? 'Please enter your email address'
                                 : EMAIL_RE.test(v.trim()) ? null : 'Enter a valid email, like you@email.com' },
   { id:'coPhone',   validate: v => !v.trim() ? 'Please enter a phone number'
-                                : isValidPhone(v) ? null : 'Enter a UAE number, like 050 123 4567' },
+                                : isValidPhone(v, state.country) ? null
+                                : `Enter a valid number, like ${countryOf(state.country).phoneExample}` },
   { id:'coAddress', validate: v => v.trim() ? null : 'Please enter your street and villa / apartment', max:120 },
   { id:'coNotes',   validate: () => null, max:200 }
 ];
@@ -1273,7 +1371,7 @@ async function renderAdmin() {
               </div>
 
               <div style="font-size:12px; color:var(--ink-soft); margin-bottom:8px;">
-                📍 ${o.shippingAddress ? `${o.shippingAddress.emirate} (${o.shippingAddress.address})` : 'UAE'}
+                📍 ${o.shippingAddress ? `${regionOf(o)}, ${countryOf(o.shippingAddress.country).name} (${o.shippingAddress.address})` : '—'}
               </div>
 
               <div style="background:var(--surface-alt); border-radius:6px; padding:8px 10px; font-size:12px; color:var(--ink-soft); margin-bottom:8px;">

@@ -40,7 +40,8 @@ The free-text street line is unchanged. Changing country re-renders the region d
 Validation becomes country-aware in what it *accepts*, but deliberately not strict about matching the selected country: a customer ordering to Lebanon may still carry a UAE number, and rejecting that repeats the formatting-pedantry this project just removed.
 
 - Accept UAE forms (`+971…`, `00971…`, local `0…`) and Lebanese forms (`+961…`, `00961…`, local `0…`).
-- Match on **digit length, not a prefix whitelist**: Lebanese local numbers are 8 digits including the leading zero, UAE local numbers are 9 or 10. Enumerating valid mobile prefixes would reject legitimate numbers as carriers add ranges.
+- Match on **digit length, not a prefix whitelist**: Lebanese local numbers are 8 or 9 digits including the leading zero (8 for landlines and the `03` mobile prefix, 9 for `70`/`71`/`76`/`78`/`79`/`81`), UAE local numbers are 9 or 10. Enumerating valid mobile prefixes would reject legitimate numbers as carriers add ranges.
+- The two ranges overlap at 9 digits, so a bare 9-digit local number is genuinely ambiguous; that is the case the selected country resolves.
 - Where a bare local number is ambiguous, resolve it using the selected country; an explicit `+971`/`+961` always wins over the selection.
 - Normalise to E.164 using whichever country's pattern matched.
 
