@@ -1,10 +1,10 @@
-// Run: node netlify/functions/order-notification.test.mjs
+// Run: node tests/order-notification.test.mjs
 //
 // Exercises the notification function without touching Resend: global fetch is
 // stubbed so the outgoing request can be inspected. Covers the shared-secret
 // check and the HTML escaping of customer-supplied values, which are the two
 // things here that would be costly to get wrong.
-const MOD = './order-notification.mjs';
+const MOD = '../netlify/functions/order-notification.mjs';
 
 const ORDER = {
   id: 'DS-4821',
