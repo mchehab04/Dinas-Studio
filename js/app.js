@@ -411,7 +411,16 @@ function renderGrid(){
   lastGridSignature = signature;
 
   if(list.length===0){
-    grid.innerHTML = `<div style="grid-column:1/-1; text-align:center; padding:40px 10px; color:var(--ink-soft); font-size:13.5px;">No pieces match yet — try a different filter.</div>`;
+    // An empty catalogue and an over-tight filter look identical here but need
+    // opposite messages: telling someone to change a filter they never set
+    // blames them for an outage and offers a remedy that does nothing.
+    grid.innerHTML = PRODUCTS.length === 0
+      ? `<div class="grid-message">
+           <strong>We couldn't load the collection.</strong>
+           <p>This is usually a connection problem. Your bag and saved items are safe.</p>
+           <button class="primary-btn" onclick="retryProducts()">Try again</button>
+         </div>`
+      : `<div class="grid-message">No pieces match yet — try a different filter.</div>`;
     return;
   }
   grid.innerHTML = list.map(p => `
@@ -1788,8 +1797,12 @@ async function saveNewProduct() {
   const fabric = document.getElementById('npFabric').value.trim();
   const desc = document.getElementById('npDesc').value.trim();
 
-  if(!name || !price) {
-    showToast("Please enter piece name and price *");
+  if(!name) {
+    showToast("Please enter a piece name");
+    return;
+  }
+  if(!(Number(price) > 0)) {
+    showToast("Enter a price greater than zero");
     return;
   }
 
@@ -1879,6 +1892,21 @@ function showToast(msg){
 }
 
 /* ========================= INIT ========================= */
+// Deliberately no timeout around the fetch: the Supabase client already gives
+// up after ~8s, and racing it shorter would fail spuriously on exactly the slow
+// connections this shop needs to work on.
+async function retryProducts(){
+  const grid = document.getElementById('productGrid');
+  if(grid) grid.innerHTML = `<div class="grid-message">Loading…</div>`;
+  try {
+    PRODUCTS = await apiService.fetchProducts();
+  } catch (e) {
+    console.error('Failed to load products', e);
+  }
+  lastGridSignature = null;
+  renderGrid();
+}
+
 async function initApp() {
   await loadCurrentUser();
   try {

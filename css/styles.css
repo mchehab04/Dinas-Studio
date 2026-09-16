@@ -730,6 +730,17 @@
   flex: 1;
 }
 
+.grid-message {
+  grid-column: 1 / -1;
+  text-align: center;
+  padding: 40px 16px;
+  color: var(--ink-soft);
+  font-size: 13.5px;
+}
+.grid-message strong { display: block; color: var(--ink); font-size: 15px; margin-bottom: 6px; }
+.grid-message p { margin: 0 0 16px; }
+.grid-message .primary-btn { padding: 10px 22px; font-size: 13px; }
+
 /* Admin photo picker */
 .photo-picker { margin-bottom: 16px; }
 .photo-grid {
