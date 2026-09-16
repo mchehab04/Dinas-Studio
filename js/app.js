@@ -1055,15 +1055,26 @@ const CHECKOUT_FIELDS = [
   { id:'coNotes',   validate: () => null, max:200 }
 ];
 
+const emailField = {
+  id:'authEmail',
+  validate: v => !v.trim() ? 'Please enter your email address'
+               : EMAIL_RE.test(v.trim()) ? null : 'Enter a valid email, like you@email.com'
+};
+// Both the signup and the set-a-new-password forms hold a password to the same
+// rules, so they share one validator rather than letting two copies drift.
+const newPasswordField = {
+  id:'authPass',
+  validate: v => passwordMeetsRules(v) ? null : 'Password needs to meet every requirement below'
+};
+
 function authFields(){
-  return [
-    { id:'authEmail', validate: v => !v.trim() ? 'Please enter your email address'
-                                   : EMAIL_RE.test(v.trim()) ? null : 'Enter a valid email, like you@email.com' },
-    { id:'authPass',  validate: v => authTab === 'signup'
-                                   ? (passwordMeetsRules(v) ? null : 'Password needs to meet every requirement below')
-                                   : (v ? null : 'Please enter your password') }
-  ];
+  if(authTab === 'reset') return [emailField];
+  if(authTab === 'recovery') return [newPasswordField];
+  if(authTab === 'signup') return [emailField, newPasswordField];
+  return [emailField, { id:'authPass', validate: v => v ? null : 'Please enter your password' }];
 }
+// Signup and recovery both show the live rules checklist.
+function authShowsPwRules(){ return authTab === 'signup' || authTab === 'recovery'; }
 
 function fieldsFor(form){ return form === 'auth' ? authFields() : CHECKOUT_FIELDS; }
 
@@ -1131,7 +1142,7 @@ function wireForm(form){
     input.addEventListener('input', () => {
       if(touchedFields.has(field.id)) validateField(form, field.id);
       updateCharCount(field);
-      if(form === 'auth' && field.id === 'authPass') renderPwRules();
+      if(form === 'auth' && field.id === 'authPass' && authShowsPwRules()) renderPwRules();
       refreshSubmit(form);
     });
     if(form === 'auth'){
@@ -1207,33 +1218,56 @@ async function renderAccount(){
     return;
   }
 
-  title.textContent = "Welcome";
+  const labels = { signin:'Sign In', signup:'Create Account', reset:'Send Reset Link', recovery:'Set New Password' };
+  const showsEmail = authTab !== 'recovery';
+  const showsPassword = authTab !== 'reset';
+
+  title.textContent = authTab === 'recovery' ? "Choose a new password"
+                    : authTab === 'reset' ? "Reset your password"
+                    : "Welcome";
+
   el.innerHTML = `
+    ${authTab === 'signin' || authTab === 'signup' ? `
     <div class="auth-tabs" style="margin-top:12px;">
       <button class="auth-tab ${authTab==='signin'?'active':''}" onclick="setAuthTab('signin')">Sign In</button>
       <button class="auth-tab ${authTab==='signup'?'active':''}" onclick="setAuthTab('signup')">Create Account</button>
-    </div>
+    </div>` : ``}
     <div class="auth-body">
+      ${authTab === 'reset' ? `
+      <p class="auth-note">Enter the email you signed up with and we'll send you a link to set a new password.</p>` : ``}
+      ${authTab === 'recovery' ? `
+      <p class="auth-note">Pick a new password for your account. You'll be signed in once it's saved.</p>` : ``}
+
       ${authTab==='signup' ? `
       <div class="field"><label>Full Name</label><input id="authName" placeholder="Dina Amari"></div>
       ` : ``}
+
+      ${showsEmail ? `
       <div class="field">
         <label>Email *</label>
         <input id="authEmail" type="email" placeholder="you@email.com" autocomplete="email">
         <div class="field-error" id="authEmailErr"></div>
-      </div>
+      </div>` : ``}
+
+      ${showsPassword ? `
       <div class="field">
-        <label>Password *</label>
-        <input id="authPass" type="password" placeholder="••••••••" autocomplete="${authTab==='signup'?'new-password':'current-password'}">
+        <label>${authTab === 'recovery' ? 'New Password' : 'Password'} *</label>
+        <input id="authPass" type="password" placeholder="••••••••" autocomplete="${authTab==='signin'?'current-password':'new-password'}">
         <div class="field-error" id="authPassErr"></div>
-        ${authTab==='signup' ? `<ul class="pw-rules" id="pwRules"></ul>` : ``}
-      </div>
-      <button class="primary-btn" id="authSubmit" style="width:100%;" onclick="handleAuthSubmit()" disabled>${authTab==='signin' ? 'Sign In' : 'Create Account'}</button>
+        ${authShowsPwRules() ? `<ul class="pw-rules" id="pwRules"></ul>` : ``}
+      </div>` : ``}
+
+      <button class="primary-btn" id="authSubmit" style="width:100%;" onclick="handleAuthSubmit()" disabled>${labels[authTab]}</button>
+
+      ${authTab === 'signin' ? `
+      <button class="auth-link" onclick="setAuthTab('reset')">Forgot your password?</button>` : ``}
+      ${authTab === 'reset' ? `
+      <button class="auth-link" onclick="setAuthTab('signin')">Back to sign in</button>` : ``}
     </div>
   `;
 
   touchedFields = new Set();
-  if(authTab === 'signup') renderPwRules();
+  if(authShowsPwRules()) renderPwRules();
   wireForm('auth');
 }
 
@@ -1241,8 +1275,31 @@ async function handleAuthSubmit(){
   const emailEl = document.getElementById('authEmail');
   const passEl = document.getElementById('authPass');
   const nameEl = document.getElementById('authName');
-  const email = emailEl.value.trim();
-  const password = passEl.value;
+  const email = emailEl ? emailEl.value.trim() : '';
+  const password = passEl ? passEl.value : '';
+
+  if(authTab === 'reset'){
+    if(!email){ showToast("Enter your email address"); return; }
+    await supabaseClient.auth.resetPasswordForEmail(email, { redirectTo: window.location.origin + '/' });
+    // Deliberately the same message whether or not an account exists — otherwise
+    // this form becomes a way to discover who has an account here.
+    showToast("If that email has an account, a reset link is on its way ✓");
+    authTab = 'signin';
+    await renderAccount();
+    return;
+  }
+
+  if(authTab === 'recovery'){
+    if(!passwordMeetsRules(password)){ showToast("Password doesn't meet the requirements"); return; }
+    const { error } = await supabaseClient.auth.updateUser({ password });
+    if(error){ showToast(error.message); return; }
+    history.replaceState(null, '', location.pathname + location.search);
+    await loadCurrentUser();
+    showToast("Password updated ✓");
+    authTab = 'signin';
+    await resolvePostAuthRedirect();
+    return;
+  }
 
   if(!email || !password){ showToast("Enter an email and password"); return; }
 
@@ -1624,5 +1681,14 @@ async function routeAdminHash() {
 }
 
 window.addEventListener('hashchange', routeAdminHash);
+
+// Arriving from a reset email: the Supabase client lifts the recovery token out
+// of the URL and fires this, which is the only reliable signal that the visit is
+// a password reset rather than an ordinary sign-in.
+supabaseClient.auth.onAuthStateChange(event => {
+  if(event !== 'PASSWORD_RECOVERY') return;
+  authTab = 'recovery';
+  openAccount();
+});
 
 initApp();
