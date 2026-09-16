@@ -15,20 +15,33 @@ create table public.profiles (
 
 alter table public.profiles enable row level security;
 
+-- Read the caller's role with RLS bypassed. A policy on profiles that queries
+-- profiles inline would re-trigger itself and abort with 42P17 (infinite
+-- recursion), so every admin check goes through these helpers instead.
+create or replace function public.current_profile_role()
+returns text
+language sql
+security definer
+set search_path = public
+stable
+as $$ select role from public.profiles where id = auth.uid() $$;
+
+create or replace function public.is_admin()
+returns boolean
+language sql
+security definer
+set search_path = public
+stable
+as $$ select coalesce(public.current_profile_role() = 'admin', false) $$;
+
 create policy "profiles_select_own_or_admin"
   on public.profiles for select
-  using (
-    auth.uid() = id
-    or exists (select 1 from public.profiles p where p.id = auth.uid() and p.role = 'admin')
-  );
+  using (auth.uid() = id or public.is_admin());
 
 create policy "profiles_update_own"
   on public.profiles for update
   using (auth.uid() = id)
-  with check (
-    auth.uid() = id
-    and role = (select role from public.profiles where id = auth.uid())
-  );
+  with check (auth.uid() = id and role = public.current_profile_role());
 
 -- Auto-create a profile row whenever someone signs up
 create function public.handle_new_user()
@@ -73,8 +86,8 @@ create policy "products_select_all"
 
 create policy "products_write_admin_only"
   on public.products for all
-  using (exists (select 1 from public.profiles p where p.id = auth.uid() and p.role = 'admin'))
-  with check (exists (select 1 from public.profiles p where p.id = auth.uid() and p.role = 'admin'));
+  using (public.is_admin())
+  with check (public.is_admin());
 
 -- ---------- orders ----------
 create table public.orders (
@@ -100,11 +113,8 @@ create policy "orders_insert_own"
 
 create policy "orders_select_own_or_admin"
   on public.orders for select
-  using (
-    auth.uid() = "userId"
-    or exists (select 1 from public.profiles p where p.id = auth.uid() and p.role = 'admin')
-  );
+  using (auth.uid() = "userId" or public.is_admin());
 
 create policy "orders_update_admin_only"
   on public.orders for update
-  using (exists (select 1 from public.profiles p where p.id = auth.uid() and p.role = 'admin'));
+  using (public.is_admin());
