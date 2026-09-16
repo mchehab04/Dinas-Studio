@@ -982,20 +982,20 @@ async function signOut(){
 let adminTab = "orders"; // "orders" | "inventory" | "add"
 let newProductPaletteIndex = 0;
 
-function openAdmin() {
+async function openAdmin() {
   closeAllSheets();
-  renderAdmin();
+  await renderAdmin();
   openSheet('adminSheet');
 }
 
-function setAdminTab(tab) {
+async function setAdminTab(tab) {
   adminTab = tab;
-  renderAdmin();
+  await renderAdmin();
 }
 
-function renderAdmin() {
+async function renderAdmin() {
   const el = document.getElementById('adminContent');
-  const orders = apiService.getOrders();
+  const orders = await apiService.getOrders();
   
   const totalRevenue = orders.reduce((sum, o) => sum + (o.total || 0), 0);
   const totalOrders = orders.length;
@@ -1031,9 +1031,6 @@ function renderAdmin() {
 
       <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:12px;">
         <h3 style="font-size:15px; margin:0;">Customer Orders (${orders.length})</h3>
-        ${orders.length === 0 ? `
-          <button class="filter-btn" onclick="seedSampleOrders()" style="font-size:11.5px; padding:5px 10px;">+ Load Sample Orders</button>
-        ` : ''}
       </div>
 
       ${orders.length === 0 ? `
@@ -1041,7 +1038,6 @@ function renderAdmin() {
           <svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="#D97C8B" stroke-width="1.5" style="margin:0 auto 10px; display:block;"><path d="M6 8h12l-1 12H7L6 8z"/><path d="M9 8V6a3 3 0 0 1 6 0v2"/></svg>
           <div style="font-weight:700; font-size:14px; margin-bottom:4px;">No customer orders yet</div>
           <p style="font-size:12px; color:var(--ink-soft); margin-bottom:14px;">Orders placed on the website will automatically appear here.</p>
-          <button class="primary-btn" style="font-size:12px; padding:8px 16px;" onclick="seedSampleOrders()">Load Sample Orders to Preview</button>
         </div>
       ` : `
         <div class="orders-list">
@@ -1236,50 +1232,10 @@ async function saveNewProduct() {
   renderGrid();
 }
 
-function updateStatus(orderId, newStatus) {
-  apiService.updateOrderStatus(orderId, newStatus);
+async function updateStatus(orderId, newStatus) {
+  await apiService.updateOrderStatus(orderId, newStatus);
   showToast(`Order ${orderId} updated to ${newStatus} ✓`);
-  renderAdmin();
-}
-
-function seedSampleOrders() {
-  const sampleOrders = [
-    {
-      id: "DS-1021",
-      date: new Date().toISOString(),
-      displayDate: "Today",
-      status: "pending",
-      customer: { name: "Fatima Al Mansoori", email: "fatima@example.com", phone: "+971 50 234 5678" },
-      shippingAddress: { emirate: "Dubai", address: "Villa 22, Umm Suqeim 2", notes: "Leave at door" },
-      paymentMethod: "cod",
-      items: [
-        { productId: 1, name: "Silk Satin Kimono Set", size: "One Size", qty: 1, price: 420, total: 420 },
-        { productId: 4, name: "Textured Linen Abaya", size: "One Size", qty: 1, price: 380, total: 380 }
-      ],
-      subtotal: 800,
-      shipping: 0,
-      total: 800
-    },
-    {
-      id: "DS-1020",
-      date: new Date(Date.now() - 86400000).toISOString(),
-      displayDate: "Yesterday",
-      status: "preparing",
-      customer: { name: "Mariam Al Nuaimi", email: "mariam@example.com", phone: "+971 55 987 6543" },
-      shippingAddress: { emirate: "Abu Dhabi", address: "Al Bateen Street, Apt 402", notes: "" },
-      paymentMethod: "card",
-      items: [
-        { productId: 2, name: "Crepe Flowing Two-Piece", size: "One Size", qty: 1, price: 390, total: 390 }
-      ],
-      subtotal: 390,
-      shipping: 0,
-      total: 390
-    }
-  ];
-
-  sampleOrders.forEach(o => storageService.saveOrder(o));
-  showToast("Sample orders loaded ✓");
-  renderAdmin();
+  await renderAdmin();
 }
 
 /* ========================= SHEETS ========================= */
@@ -1332,7 +1288,17 @@ async function initApp() {
   renderGrid();
   updateBagBadge();
   // Admin isn't linked from customer-facing UI; the store owner reaches it via #admin.
-  if(location.hash === '#admin') openAdmin();
+  if(location.hash === '#admin') {
+    if(!state.user) {
+      postAuthRedirect = 'admin';
+      setAuthTab('signin');
+      openAccount();
+    } else if(state.user.role === 'admin') {
+      openAdmin();
+    } else {
+      showToast("Not authorized");
+    }
+  }
 }
 
 initApp();
