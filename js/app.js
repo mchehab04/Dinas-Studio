@@ -412,15 +412,20 @@ function renderWishlist(){
     return;
   }
   const items = PRODUCTS.filter(p=>state.wishlist.has(p.id));
+  // Same row structure and classes as the bag list, so the two sheets read as
+  // one component rather than two lookalikes drifting apart.
   el.innerHTML = items.map(p=>`
-    <div class="wish-item" onclick="openProduct(${p.id})">
-      <div class="wish-thumb" style="${productThumbStyle(p)}">${productMedia(p)}</div>
-      <div class="wish-info">
-        <span class="wish-cat">${p.cat}</span>
-        <span class="wish-name">${p.name}</span>
-        <span class="wish-price">${formatPrice(p.price)}</span>
+    <div class="bag-item" onclick="openProduct(${p.id})">
+      <div class="bag-thumb" style="${productThumbStyle(p)}">${productMedia(p)}</div>
+      <div class="bag-info">
+        <span class="bag-name">${p.name}</span>
+        <span class="bag-meta">${p.cat}</span>
+        <div class="bag-bottom">
+          <button class="filter-btn" onclick="event.stopPropagation(); quickAdd(${p.id})">Move to Bag</button>
+          <span class="bag-price">${formatPrice(p.price)}</span>
+        </div>
+        <button class="remove-x" onclick="event.stopPropagation(); toggleWish(${p.id})">Remove</button>
       </div>
-      <button class="wish-action" onclick="event.stopPropagation(); quickAdd(${p.id})">Move to Bag</button>
     </div>
   `).join('');
 }
