@@ -1287,18 +1287,25 @@ async function initApp() {
   renderFilterPanel();
   renderGrid();
   updateBagBadge();
-  // Admin isn't linked from customer-facing UI; the store owner reaches it via #admin.
-  if(location.hash === '#admin') {
-    if(!state.user) {
-      postAuthRedirect = 'admin';
-      setAuthTab('signin');
-      openAccount();
-    } else if(state.user.role === 'admin') {
-      openAdmin();
-    } else {
-      showToast("Not authorized");
-    }
+  routeAdminHash();
+}
+
+// Admin isn't linked from customer-facing UI; the store owner reaches it via
+// #admin. Changing the hash on an open page fires no reload, so this runs both
+// on load and on hashchange.
+async function routeAdminHash() {
+  if(location.hash !== '#admin') return;
+  if(!state.user) {
+    postAuthRedirect = 'admin';
+    setAuthTab('signin');
+    openAccount();
+  } else if(state.user.role === 'admin') {
+    await openAdmin();
+  } else {
+    showToast("Not authorized");
   }
 }
+
+window.addEventListener('hashchange', routeAdminHash);
 
 initApp();
