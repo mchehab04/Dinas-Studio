@@ -6,7 +6,10 @@
 -- ---------- profiles ----------
 create table public.profiles (
   id uuid primary key references auth.users(id) on delete cascade,
-  email text not null,
+  -- Unique mirrors auth.users, which already enforces one account per address.
+  -- Kept in step by the on_auth_user_email_changed trigger below, since the
+  -- signup trigger alone would let this copy go stale after an email change.
+  email text not null unique,
   name text,
   phone text,
   role text not null default 'customer' check (role in ('customer','admin')),
@@ -60,6 +63,25 @@ $$;
 create trigger on_auth_user_created
   after insert on auth.users
   for each row execute procedure public.handle_new_user();
+
+-- Keep profiles.email in step when someone changes their address in auth.
+create or replace function public.sync_profile_email()
+returns trigger
+language plpgsql
+security definer
+set search_path = public
+as $$
+begin
+  if new.email is distinct from old.email then
+    update public.profiles set email = new.email where id = new.id;
+  end if;
+  return new;
+end;
+$$;
+
+create trigger on_auth_user_email_changed
+  after update of email on auth.users
+  for each row execute procedure public.sync_profile_email();
 
 -- ---------- products ----------
 create table public.products (
