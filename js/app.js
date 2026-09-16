@@ -72,18 +72,6 @@ const storageService = {
   saveWishlist(list) {
     try { localStorage.setItem('dinas_wishlist', JSON.stringify(Array.from(list))); } catch(e){}
   },
-  getUser() {
-    try {
-      const data = localStorage.getItem('dinas_user');
-      return data ? JSON.parse(data) : null;
-    } catch(e) { return null; }
-  },
-  saveUser(user) {
-    try {
-      if(user) localStorage.setItem('dinas_user', JSON.stringify(user));
-      else localStorage.removeItem('dinas_user');
-    } catch(e){}
-  },
   getOrders() {
     try {
       const data = localStorage.getItem('dinas_orders');
@@ -218,6 +206,19 @@ const apiService = {
   }
 };
 
+async function loadCurrentUser() {
+  const { data: { user } } = await supabaseClient.auth.getUser();
+  if(!user) { state.user = null; return; }
+  const { data: profile } = await supabaseClient.from('profiles').select('*').eq('id', user.id).single();
+  state.user = {
+    id: user.id,
+    email: user.email,
+    name: (profile && profile.name) || user.email.split('@')[0],
+    phone: profile ? profile.phone : null,
+    role: (profile && profile.role) || 'customer'
+  };
+}
+
 /* ========================= STATE ========================= */
 let state = {
   category: "All",
@@ -226,12 +227,14 @@ let state = {
   search: "",
   wishlist: new Set(storageService.getWishlist()),
   bag: storageService.getCart(),
-  user: storageService.getUser(),
+  user: null,
   filterAvail: new Set(),
   filtersOpen: false,
   tab: "shop",
   paymentMethod: "cod"
 };
+
+let postAuthRedirect = null; // null | 'checkout' | 'admin' — set before sending someone to sign in
 
 function paletteFor(p){
   if(typeof p === 'object' && p !== null) {
@@ -882,19 +885,19 @@ function renderOrderSuccess(order) {
 
 /* ========================= ACCOUNT & AUTH ========================= */
 let authTab = "signin";
-function openAccount(){
-  renderAccount();
+async function openAccount(){
+  await renderAccount();
   openSheet('accountSheet');
 }
-function setAuthTab(t){ authTab = t; renderAccount(); }
+async function setAuthTab(t){ authTab = t; await renderAccount(); }
 
-function renderAccount(){
+async function renderAccount(){
   const title = document.getElementById('accountTitle');
   const el = document.getElementById('accountContent');
 
   if(state.user){
     title.textContent = "My Account";
-    const myOrders = apiService.getCustomerOrders(state.user.email);
+    const myOrders = await apiService.getCustomerOrders(state.user.email);
 
     el.innerHTML = `
       <div class="account-hero">
@@ -944,44 +947,61 @@ function renderAccount(){
       <button class="auth-tab ${authTab==='signup'?'active':''}" onclick="setAuthTab('signup')">Create Account</button>
     </div>
     <div class="auth-body">
-      <button class="google-btn" onclick="mockGoogleAuth()">
-        <svg width="18" height="18" viewBox="0 0 48 48"><path fill="#FFC107" d="M43.6 20.5H42V20H24v8h11.3C33.9 32.6 29.4 36 24 36c-6.6 0-12-5.4-12-12s5.4-12 12-12c3.1 0 5.8 1.1 8 3l6-6C34 5.1 29.3 3 24 3 12.4 3 3 12.4 3 24s9.4 21 21 21 21-9.4 21-21c0-1.4-.1-2.7-.4-3.5z"/><path fill="#FF3D00" d="M6.3 14.7l6.6 4.8C14.7 16 19 13 24 13c3.1 0 5.8 1.1 8 3l6-6C34 5.1 29.3 3 24 3 16.3 3 9.7 7.3 6.3 14.7z"/><path fill="#4CAF50" d="M24 45c5.2 0 9.9-2 13.5-5.2l-6.2-5.3C29.3 36.4 26.8 37 24 37c-5.3 0-9.8-3.4-11.4-8.1l-6.5 5C9.6 40.6 16.2 45 24 45z"/><path fill="#1976D2" d="M43.6 20.5H42V20H24v8h11.3c-.8 2.3-2.3 4.3-4.2 5.7l6.2 5.3C40.9 36.6 44 30.9 44 24c0-1.4-.1-2.7-.4-3.5z"/></svg>
-        Continue with Google
-      </button>
-      <div class="divider-row"><div class="line"></div><span>OR</span><div class="line"></div></div>
       ${authTab==='signup' ? `
       <div class="field"><label>Full Name</label><input id="authName" placeholder="Dina Amari"></div>
       ` : ``}
       <div class="field"><label>Email</label><input id="authEmail" type="email" placeholder="you@email.com"></div>
       <div class="field"><label>Password</label><input id="authPass" type="password" placeholder="••••••••"></div>
-      <button class="primary-btn" style="width:100%;" onclick="mockManualAuth()">${authTab==='signin' ? 'Sign In' : 'Create Account'}</button>
+      <button class="primary-btn" style="width:100%;" onclick="handleAuthSubmit()">${authTab==='signin' ? 'Sign In' : 'Create Account'}</button>
     </div>
   `;
 }
 
-function mockGoogleAuth(){
-  state.user = {name:"Dina Amari", email:"dina@gmail.com"};
-  storageService.saveUser(state.user);
-  renderAccount();
-  showToast("Signed in as Dina Amari ✓");
-}
-
-function mockManualAuth(){
+async function handleAuthSubmit(){
   const emailEl = document.getElementById('authEmail');
+  const passEl = document.getElementById('authPass');
   const nameEl = document.getElementById('authName');
-  const email = emailEl ? emailEl.value.trim() : "";
-  if(!email){ showToast("Enter an email to continue"); return; }
-  const name = (nameEl && nameEl.value.trim()) ? nameEl.value.trim() : email.split('@')[0];
-  state.user = {name, email};
-  storageService.saveUser(state.user);
-  renderAccount();
-  showToast(authTab==='signin' ? "Welcome back ✓" : "Account created ✓");
+  const email = emailEl.value.trim();
+  const password = passEl.value;
+
+  if(!email || !password){ showToast("Enter an email and password"); return; }
+
+  if(authTab === 'signup'){
+    if(password.length < 6){ showToast("Password must be at least 6 characters"); return; }
+    const name = (nameEl && nameEl.value.trim()) ? nameEl.value.trim() : email.split('@')[0];
+    const { error } = await supabaseClient.auth.signUp({
+      email, password, options: { data: { name } }
+    });
+    if(error){ showToast(error.message); return; }
+    await loadCurrentUser();
+    showToast("Account created ✓");
+  } else {
+    const { error } = await supabaseClient.auth.signInWithPassword({ email, password });
+    if(error){ showToast(error.message); return; }
+    await loadCurrentUser();
+    showToast("Welcome back ✓");
+  }
+
+  await resolvePostAuthRedirect();
 }
 
-function signOut(){
+async function resolvePostAuthRedirect(){
+  const redirect = postAuthRedirect;
+  postAuthRedirect = null;
+  if(redirect === 'checkout'){
+    openCheckout();
+  } else if(redirect === 'admin'){
+    if(state.user.role === 'admin') await openAdmin();
+    else showToast("Not authorized");
+  } else {
+    await renderAccount();
+  }
+}
+
+async function signOut(){
+  await supabaseClient.auth.signOut();
   state.user = null;
-  storageService.saveUser(null);
-  renderAccount();
+  await renderAccount();
   showToast("Signed out");
 }
 
@@ -1327,6 +1347,7 @@ function showToast(msg){
 
 /* ========================= INIT ========================= */
 async function initApp() {
+  await loadCurrentUser();
   try {
     PRODUCTS = await apiService.fetchProducts();
   } catch (e) {
