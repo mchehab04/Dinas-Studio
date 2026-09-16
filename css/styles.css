@@ -790,6 +790,19 @@ button:disabled {
   font-size: 13.5px;
   margin: 10px 0 16px;
 }
+.transfer-note {
+  text-align: left;
+  background: var(--surface-alt);
+  border: 1px solid var(--accent-soft);
+  border-radius: var(--radius-md);
+  padding: 12px 14px;
+  margin: 14px 0 0;
+  font-size: 12.5px;
+  line-height: 1.5;
+  color: var(--ink-soft);
+}
+.transfer-note strong { color: var(--primary); }
+
 .order-summary-box {
   text-align: left;
   background: var(--surface);

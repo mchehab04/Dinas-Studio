@@ -756,9 +756,9 @@ function renderCheckout() {
           <div class="payment-pill-title">Cash on Delivery</div>
           <div class="payment-pill-sub">Pay courier in cash / card</div>
         </div>
-        <div class="payment-pill ${state.paymentMethod==='card'?'active':''}" data-method="card" onclick="setPaymentMethod('card')">
-          <div class="payment-pill-title">Card / Apple Pay</div>
-          <div class="payment-pill-sub">Online checkout ready</div>
+        <div class="payment-pill ${state.paymentMethod==='transfer'?'active':''}" data-method="transfer" onclick="setPaymentMethod('transfer')">
+          <div class="payment-pill-title">Bank Transfer</div>
+          <div class="payment-pill-sub">Details sent on WhatsApp</div>
         </div>
       </div>
 
@@ -865,6 +865,11 @@ function renderOrderSuccess(order) {
       
       <div class="order-number-badge">Order ID: ${order.id}</div>
 
+      ${order.paymentMethod === 'transfer' ? `
+      <div class="transfer-note">
+        <strong>Next step:</strong> we'll message you on WhatsApp at ${order.customer.phone} with the transfer details. Your order is reserved until payment arrives.
+      </div>` : ''}
+
       <div class="order-summary-box">
         <div class="order-detail-row">
           <span>Customer:</span>
@@ -884,7 +889,7 @@ function renderOrderSuccess(order) {
         </div>
         <div class="order-detail-row">
           <span>Payment:</span>
-          <strong style="text-transform:uppercase;">${order.paymentMethod === 'cod' ? 'Cash on Delivery' : 'Card / Online'}</strong>
+          <strong style="text-transform:uppercase;">${order.paymentMethod === 'cod' ? 'Cash on Delivery' : 'Bank Transfer'}</strong>
         </div>
         <div class="order-detail-row" style="border-top:1px dashed var(--line); padding-top:8px; margin-top:8px;">
           <span>Items Ordered:</span>
