@@ -1444,6 +1444,10 @@ async function updateStatus(orderId, newStatus) {
 
 /* ========================= SHEETS ========================= */
 function openSheet(id){
+  // Sheets are full-screen and share one overlay, so opening any of them closes
+  // the rest. Without this, a sheet opened from inside another — a piece opened
+  // from the saved-items list — leaves both stacked.
+  closeAllSheets();
   document.getElementById('overlay').classList.add('open');
   const sheet = document.getElementById(id);
   if(sheet) sheet.classList.add('open');
