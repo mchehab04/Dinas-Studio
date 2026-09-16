@@ -48,12 +48,6 @@ const storageService = {
   saveProducts(list) {
     try { localStorage.setItem('dinas_products', JSON.stringify(list)); } catch(e){}
   },
-  getProductsStamp() {
-    try { return localStorage.getItem('dinas_products_stamp'); } catch(e) { return null; }
-  },
-  saveProductsStamp(stamp) {
-    try { localStorage.setItem('dinas_products_stamp', stamp); } catch(e){}
-  },
   getCart() {
     try {
       const data = localStorage.getItem('dinas_cart');
@@ -90,73 +84,55 @@ const storageService = {
 /* ========================= API SERVICE LAYER (BaaS Ready) ========================= */
 const apiService = {
   async fetchProducts() {
-    // Always read the source catalogue so edits to products.json actually reach
-    // returning visitors. The local cache only survives while the source is unchanged
-    // (it exists to hold admin stock edits, not to shadow a new catalogue forever).
-    let source = null;
     try {
-      const res = await fetch('data/products.json', { cache: 'no-store' });
-      if(res.ok) source = await res.json();
-    } catch(e) { /* offline: fall through to whatever we cached */ }
-
-    const sourceStamp = source ? JSON.stringify(source) : null;
-    const cached = storageService.getProducts();
-
-    if(cached && cached.length > 0 && (!sourceStamp || sourceStamp === storageService.getProductsStamp())) {
-      let updated = false;
-      cached.forEach(p => {
-        if(!p.fabric) {
-          p.fabric = getProductFabric(p);
-          updated = true;
-        }
-      });
-      if(updated) storageService.saveProducts(cached);
-      return cached;
+      const { data, error } = await supabaseClient.from('products').select('*').order('id', { ascending: true });
+      if(error) throw error;
+      storageService.saveProducts(data);
+      return data;
+    } catch(e) {
+      const cached = storageService.getProducts();
+      if(cached && cached.length > 0) return cached;
+      throw e;
     }
-
-    if(!source) throw new Error('Failed to load products');
-    storageService.saveProducts(source);
-    storageService.saveProductsStamp(sourceStamp);
-    return source;
   },
   async updateProductStock(id, stockStatus) {
-    const p = PRODUCTS.find(x => x.id === id);
-    if(p) {
-      p.stock = stockStatus;
-      if(stockStatus === "out") {
-        p.soldOut = [...p.sizes];
-      } else {
-        p.soldOut = [];
-      }
-      storageService.saveProducts(PRODUCTS);
-      return p;
-    }
-    return null;
+    const existing = PRODUCTS.find(x => x.id === id);
+    if(!existing) return null;
+    const soldOut = stockStatus === 'out' ? [...existing.sizes] : [];
+    const { data, error } = await supabaseClient
+      .from('products')
+      .update({ stock: stockStatus, soldOut })
+      .eq('id', id)
+      .select()
+      .single();
+    if(error) { console.error(error); return null; }
+    const idx = PRODUCTS.findIndex(x => x.id === id);
+    if(idx !== -1) PRODUCTS[idx] = data;
+    storageService.saveProducts(PRODUCTS);
+    return data;
   },
   async addProduct(productData) {
-    const maxId = PRODUCTS.length > 0 ? Math.max(...PRODUCTS.map(p => p.id)) : 0;
-    const newProduct = {
-      id: maxId + 1,
-      name: productData.name,
-      cat: productData.cat,
-      price: Number(productData.price),
-      stock: productData.stock || "in",
-      sizes: ["One Size"],
-      soldOut: productData.stock === "out" ? ["One Size"] : [],
-      desc: productData.desc || "Handcrafted with premium fabrics and finished with signature tailoring.",
-      fabric: productData.fabric || "Premium Crepe / Silk Blend",
-      pop: 85,
-      paletteIndex: productData.paletteIndex !== undefined ? productData.paletteIndex : (maxId + 1) % PALETTES.length,
-      nw: true
-    };
-    PRODUCTS.unshift(newProduct);
+    const { data, error } = await supabaseClient
+      .from('products')
+      .insert({
+        name: productData.name,
+        cat: productData.cat,
+        price: Number(productData.price),
+        stock: productData.stock || "in",
+        sizes: ["One Size"],
+        soldOut: productData.stock === "out" ? ["One Size"] : [],
+        desc: productData.desc || "Handcrafted with premium fabrics and finished with signature tailoring.",
+        fabric: productData.fabric || "Premium Crepe / Silk Blend",
+        pop: 85,
+        paletteIndex: productData.paletteIndex,
+        nw: true
+      })
+      .select()
+      .single();
+    if(error) { console.error(error); return null; }
+    PRODUCTS.unshift(data);
     storageService.saveProducts(PRODUCTS);
-    return newProduct;
-  },
-  async deleteProduct(id) {
-    PRODUCTS = PRODUCTS.filter(p => p.id !== id);
-    storageService.saveProducts(PRODUCTS);
-    return true;
+    return data;
   },
   async createOrder(orderPayload) {
     const { data: { user } } = await supabaseClient.auth.getUser();
@@ -1220,10 +1196,10 @@ function selectPalette(idx) {
 }
 
 async function setProductStock(productId, stockStatus) {
-  await apiService.updateProductStock(productId, stockStatus);
-  const p = PRODUCTS.find(x => x.id === productId);
-  showToast(`Updated "${p.name}" to ${stockStatus.toUpperCase()} ✓`);
-  renderAdmin();
+  const updated = await apiService.updateProductStock(productId, stockStatus);
+  if(!updated) { showToast("Failed to update stock"); return; }
+  showToast(`Updated "${updated.name}" to ${stockStatus.toUpperCase()} ✓`);
+  await renderAdmin();
   renderGrid();
   if(currentProduct && currentProduct.id === productId) {
     currentProduct.stock = stockStatus;
@@ -1254,8 +1230,9 @@ async function saveNewProduct() {
     paletteIndex: newProductPaletteIndex
   });
 
+  if(!newP) { showToast("Failed to publish — please try again"); return; }
   showToast(`"${name}" published to storefront ✓`);
-  setAdminTab('inventory');
+  await setAdminTab('inventory');
   renderGrid();
 }
 
