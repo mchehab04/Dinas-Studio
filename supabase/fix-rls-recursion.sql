@@ -1,14 +1,20 @@
 -- ============================================================
--- Fix: "infinite recursion detected in policy for relation profiles" (42P17)
+-- Two fixes for the originally-provisioned schema.
 --
--- The original policies checked admin-ness with an inline
---   exists (select 1 from public.profiles ...)
--- Reading profiles re-triggers profiles' own SELECT policy, which reads
--- profiles again. Postgres aborts with 42P17, so every admin check failed
--- (silently, on profiles/products/orders alike).
+-- 1. "infinite recursion detected in policy for relation profiles" (42P17)
+--    The original policies checked admin-ness with an inline
+--      exists (select 1 from public.profiles ...)
+--    Reading profiles re-triggers profiles' own SELECT policy, which reads
+--    profiles again. Postgres aborts with 42P17. Because the products policy
+--    is FOR ALL, its USING clause ran on SELECT too, so this took the public
+--    storefront down as well, not just the admin paths.
+--    The security definer helpers below read profiles with RLS bypassed, so
+--    the policies can ask "is this user an admin?" without recursing.
 --
--- These security definer helpers read profiles with RLS bypassed, so the
--- policies can ask "is this user an admin?" without recursing.
+-- 2. "permission denied for table products" (42501)
+--    RLS narrows which rows a role may touch, but the role still needs plain
+--    SQL privileges on the table first. Tables created through the SQL editor
+--    don't always inherit Supabase's default grants, so they're explicit here.
 --
 -- Safe to re-run. Run in Supabase Dashboard > SQL Editor > New query > Run.
 -- ============================================================
@@ -58,3 +64,15 @@ drop policy if exists "orders_update_admin_only" on public.orders;
 create policy "orders_update_admin_only"
   on public.orders for update
   using (public.is_admin());
+
+-- ---------- table privileges ----------
+-- PostgREST connects as `anon` when signed out and `authenticated` when signed
+-- in. RLS still decides which rows each may see; these only open the door.
+grant usage on schema public to anon, authenticated;
+
+grant select on public.products to anon, authenticated;
+grant insert, update on public.products to authenticated;
+
+grant select, update on public.profiles to authenticated;
+
+grant select, insert, update on public.orders to authenticated;

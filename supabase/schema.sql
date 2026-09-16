@@ -118,3 +118,15 @@ create policy "orders_select_own_or_admin"
 create policy "orders_update_admin_only"
   on public.orders for update
   using (public.is_admin());
+
+-- ---------- table privileges ----------
+-- PostgREST connects as `anon` when signed out and `authenticated` when signed
+-- in. RLS still decides which rows each may see; these only open the door.
+grant usage on schema public to anon, authenticated;
+
+grant select on public.products to anon, authenticated;
+grant insert, update on public.products to authenticated;
+
+grant select, update on public.profiles to authenticated;
+
+grant select, insert, update on public.orders to authenticated;
