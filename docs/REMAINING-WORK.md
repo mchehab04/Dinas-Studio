@@ -27,8 +27,9 @@ Full migration record: [`CLOUDFLARE-MIGRATION.md`](CLOUDFLARE-MIGRATION.md).
 ## Small cleanups, post-migration
 
 - [x] **Search Console:** old URL-prefix property for `fanciful-dragon-ec8169.netlify.app` removed.
-- [ ] **`public/index.html`:** remove the `google-site-verification` meta tag with content `Id7ib6p68…`. It served only that removed property; the live Domain property is verified by DNS.
-- [ ] **Optional:** add `public/404.html`. Pages currently answers any unknown path with the homepage and a 200, which Google can report as soft 404s. Nothing relies on that fallback — navigation uses `#` hashes.
+- [x] **`public/index.html`:** stale `google-site-verification` meta tag removed. The live Domain property is verified by the DNS TXT record on `@`.
+- [x] **`public/404.html` added.** Unknown paths now return a real 404 instead of the homepage with a 200.
+- [x] **Favicon.** `/favicon.ico` was answered by the SPA fallback — HTML with a 200 — so Google showed a placeholder globe instead of the logo. Real `public/favicon.ico` (48/96/144px) and `public/icon-192.png` now sit at the probed paths, with root-relative link tags. Google refreshes favicons on its own schedule, days to weeks after the deploy.
 
 ## Next up: stock, pricing and restock notifications
 
