@@ -19,7 +19,11 @@
   <meta property="og:url" content="https://dinasstudio.com/">
   <meta property="og:type" content="website">
   <meta name="twitter:card" content="summary_large_image">
-  <link rel="icon" type="image/jpeg" href="Logo.jpeg">
+  <!-- Root-relative and at /favicon.ico as well, because crawlers (Google's icon
+       fetcher included) probe that exact path before reading this tag. -->
+  <link rel="icon" href="/favicon.ico" sizes="48x48 96x96 144x144">
+  <link rel="icon" type="image/png" href="/icon-192.png" sizes="192x192">
+  <link rel="apple-touch-icon" href="/icon-192.png">
 
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link
