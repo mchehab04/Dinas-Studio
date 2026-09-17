@@ -1248,6 +1248,17 @@ function wireForm(form){
 
 /* ========================= ACCOUNT & AUTH ========================= */
 let authTab = "signin";
+let pendingEmail = "";   // address awaiting confirmation, for the resend button
+
+async function resendConfirmation(){
+  if(!pendingEmail) return;
+  const btn = document.getElementById('resendBtn');
+  if(btn) btn.disabled = true;
+  const { error } = await supabaseClient.auth.resend({ type: 'signup', email: pendingEmail });
+  // Supabase rate-limits resends; surfacing its message beats a silent no-op.
+  showToast(error ? error.message : "Sent again — check your inbox ✓");
+  if(btn) btn.disabled = false;
+}
 async function openAccount(){
   await renderAccount();
   openSheet('accountSheet');
@@ -1300,6 +1311,23 @@ async function renderAccount(){
         <button class="signout-btn" onclick="signOut()">Sign Out</button>
       </div>
     `;
+    return;
+  }
+
+  if(authTab === 'confirm'){
+    title.textContent = "Check your email";
+    el.innerHTML = `
+      <div class="auth-body">
+        <p class="auth-note">
+          We've sent a confirmation link to <strong>${pendingEmail}</strong>.
+          Open it to finish setting up your account — then come back and you'll be signed in.
+        </p>
+        <p class="auth-note" style="font-size:11.5px;">
+          Nothing arrived? Check your spam folder first.
+        </p>
+        <button class="primary-btn" id="resendBtn" style="width:100%;" onclick="resendConfirmation()">Send it again</button>
+        <button class="auth-link" onclick="setAuthTab('signin')">Back to sign in</button>
+      </div>`;
     return;
   }
 
@@ -1391,15 +1419,36 @@ async function handleAuthSubmit(){
   if(authTab === 'signup'){
     if(password.length < 6){ showToast("Password must be at least 6 characters"); return; }
     const name = (nameEl && nameEl.value.trim()) ? nameEl.value.trim() : email.split('@')[0];
-    const { error } = await supabaseClient.auth.signUp({
-      email, password, options: { data: { name } }
+    const { data, error } = await supabaseClient.auth.signUp({
+      email, password, options: { data: { name }, emailRedirectTo: window.location.origin + '/' }
     });
     if(error){ showToast(error.message); return; }
+    // With confirmations on, signUp returns no session until the link is
+    // clicked. Supabase also returns this same shape for an address that is
+    // already registered, so the wait-for-email screen doubles as the reason
+    // this form can't be used to discover who has an account here.
+    if(!data.session){
+      pendingEmail = email;
+      authTab = 'confirm';
+      await renderAccount();
+      return;
+    }
     await loadCurrentUser();
     showToast("Account created ✓");
   } else {
     const { error } = await supabaseClient.auth.signInWithPassword({ email, password });
-    if(error){ showToast(error.message); return; }
+    if(error){
+      // Otherwise an unconfirmed account is a dead end: the password is right,
+      // the error is opaque, and there is no way to get another email.
+      if(/confirm/i.test(error.message)){
+        pendingEmail = email;
+        authTab = 'confirm';
+        await renderAccount();
+        return;
+      }
+      showToast(error.message);
+      return;
+    }
     await loadCurrentUser();
     showToast("Welcome back ✓");
   }
@@ -1949,10 +1998,22 @@ window.addEventListener('hashchange', routeAdminHash);
 // Arriving from a reset email: the Supabase client lifts the recovery token out
 // of the URL and fires this, which is the only reliable signal that the visit is
 // a password reset rather than an ordinary sign-in.
-supabaseClient.auth.onAuthStateChange(event => {
-  if(event !== 'PASSWORD_RECOVERY') return;
-  authTab = 'recovery';
-  openAccount();
+supabaseClient.auth.onAuthStateChange(async (event) => {
+  if(event === 'PASSWORD_RECOVERY'){
+    authTab = 'recovery';
+    openAccount();
+    return;
+  }
+  // Returning from a confirmation link is a fresh page load, so the checkout
+  // intent that sent them to sign up is long gone. The bag survives in
+  // localStorage, so saying they're in and letting them carry on beats trying
+  // to reconstruct where they were.
+  if(event === 'SIGNED_IN' && !state.user && location.hash.includes('access_token')){
+    history.replaceState(null, '', location.pathname + location.search);
+    await loadCurrentUser();
+    authTab = 'signin';
+    showToast("Email confirmed — you're signed in ✓");
+  }
 });
 
 initApp();
