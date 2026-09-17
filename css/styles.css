@@ -741,6 +741,22 @@
 .grid-message p { margin: 0 0 16px; }
 .grid-message .primary-btn { padding: 10px 22px; font-size: 13px; }
 
+.migrate-banner {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+  background: var(--surface-alt);
+  border: 1px solid var(--accent-soft);
+  border-radius: var(--radius-sm);
+  padding: 12px 14px;
+  margin-bottom: 14px;
+}
+.migrate-banner > div { flex: 1 1 200px; }
+.migrate-banner strong { font-size: 13px; color: var(--ink); }
+.migrate-banner p { margin: 4px 0 0; font-size: 12px; color: var(--ink-soft); }
+.migrate-banner .primary-btn { font-size: 12px; padding: 8px 16px; white-space: nowrap; }
+
 /* Admin photo picker */
 .photo-picker { margin-bottom: 16px; }
 .photo-grid {
@@ -1059,6 +1075,9 @@ button:disabled {
 .inventory-item {
   display: flex;
   align-items: center;
+  /* Wraps because the row carries four controls and a dual-currency price;
+     kept on one line, the piece name truncates to "Black…". */
+  flex-wrap: wrap;
   gap: 12px;
   padding: 12px;
   background: var(--surface);
@@ -1083,7 +1102,7 @@ button:disabled {
   height: 20px;
 }
 .inventory-info {
-  flex: 1;
+  flex: 1 1 140px;
   min-width: 0;
 }
 .inventory-name {
@@ -1099,11 +1118,14 @@ button:disabled {
   font-size: 11.5px;
   color: var(--ink-faint);
   display: flex;
+  flex-wrap: wrap;
   gap: 8px;
   margin-top: 2px;
 }
 .stock-btn-group {
   display: flex;
+  flex: 1 1 100%;
+  flex-wrap: wrap;
   gap: 4px;
   background: var(--surface-alt);
   padding: 3px;

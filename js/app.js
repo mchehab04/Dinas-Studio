@@ -1509,6 +1509,46 @@ async function commitPhotos(folder){
   return urls;
 }
 
+// ponytail: one-off. The seeded catalogue points at repo JPEGs that predate the
+// upload pipeline; this pulls each through it so the grid gets the small WebP
+// variant. Delete this and its button once nothing needs migrating.
+const needsPhotoMigration = p =>
+  (p.images || []).some(u => typeof u === 'string' && !u.includes(PHOTO_BUCKET));
+
+async function migratePhotos(){
+  const pending = PRODUCTS.filter(needsPhotoMigration);
+  if(pending.length === 0){ showToast("Nothing left to migrate"); return; }
+
+  const btn = document.getElementById('migrateBtn');
+  if(btn) btn.disabled = true;
+  let done = 0, failed = 0;
+
+  for(const p of pending){
+    try {
+      const urls = [];
+      for(let i = 0; i < p.images.length; i++){
+        const src = p.images[i];
+        if(src.includes(PHOTO_BUCKET)){ urls.push(src); continue; }
+        if(btn) btn.textContent = `Migrating ${done + 1} of ${pending.length}…`;
+        const res = await fetch(src);
+        if(!res.ok) throw new Error(`could not read ${src}`);
+        const blob = await res.blob();
+        urls.push(await uploadPhoto(new File([blob], `${i}.jpg`, { type: blob.type }), String(p.id), i));
+      }
+      if(!await apiService.updateProductImages(p.id, urls)) throw new Error('save failed');
+      done++;
+    } catch(e) {
+      console.error('Migration failed for', p.name, e);
+      failed++;
+    }
+  }
+
+  showToast(failed ? `Migrated ${done}, ${failed} failed — see console` : `Migrated ${done} pieces ✓`);
+  await setAdminTab('inventory');
+  lastGridSignature = null;
+  renderGrid();
+}
+
 function openPhotoEditor(productId){
   photoEditProduct = PRODUCTS.find(p => p.id === productId) || null;
   photoDraft = (photoEditProduct && photoEditProduct.images || []).map(url => ({ url }));
@@ -1624,10 +1664,19 @@ async function renderAdmin() {
     `;
   } else if(adminTab === 'inventory') {
     bodyContent = `
-      <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:14px;">
+      <div style="display:flex; justify-content:space-between; align-items:center; gap:10px; flex-wrap:wrap; margin-bottom:14px;">
         <span style="font-size:13px; color:var(--ink-soft);">Manage stock for <strong>${PRODUCTS.length} pieces</strong></span>
         <button class="primary-btn" style="font-size:11.5px; padding:6px 12px;" onclick="setAdminTab('add')">+ Add Piece</button>
       </div>
+
+      ${PRODUCTS.filter(needsPhotoMigration).length ? `
+      <div class="migrate-banner">
+        <div>
+          <strong>${PRODUCTS.filter(needsPhotoMigration).length} pieces still use the old photos.</strong>
+          <p>Converting them to WebP cuts what shoppers download by roughly 70%.</p>
+        </div>
+        <button class="primary-btn" id="migrateBtn" onclick="migratePhotos()">Convert photos</button>
+      </div>` : ''}
 
       <div class="inventory-list">
         ${PRODUCTS.map(p => `
