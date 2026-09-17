@@ -4,7 +4,7 @@
 // stubbed so the outgoing request can be inspected. Covers the shared-secret
 // check and the HTML escaping of customer-supplied values, which are the two
 // things here that would be costly to get wrong.
-const MOD = '../netlify/functions/order-notification.mjs';
+const MOD = '../lib/order-notification.js';
 
 const ORDER = {
   id: 'DS-4821',
@@ -48,9 +48,9 @@ const ownerMail = () => found(b => b.subject.startsWith('New order'));
 const customerMail = () => found(b => b.subject.startsWith("Your Dina's Studio"));
 
 const env = { RESEND_API_KEY: 'key', NOTIFY_TO: 'a@x.com, b@y.com', WEBHOOK_SECRET: 's3cret' };
-Object.assign(process.env, env);
 
-const { default: handler } = await import(MOD);
+const { handle } = await import(MOD);
+const handler = (request, e = env) => handle(request, e);
 const check = (label, cond) => console.log((cond ? 'PASS  ' : 'FAIL  ') + label);
 
 // --- auth
@@ -139,6 +139,5 @@ check('owner send fails -> customer not mailed', !customerMail());
 
 // --- missing config
 reset();
-delete process.env.RESEND_API_KEY;
-check('missing env -> 500', (await handler(req({ secret: 's3cret' }))).status === 500);
-process.env.RESEND_API_KEY = 'key';
+const { RESEND_API_KEY, ...noKey } = env;
+check('missing env -> 500', (await handler(req({ secret: 's3cret' }), noKey)).status === 500);

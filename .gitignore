@@ -17,3 +17,6 @@ data/images/originals/
 
 # Local Claude Code config
 .claude/
+
+# Local Cloudflare dev cache (wrangler pages dev)
+.wrangler/
