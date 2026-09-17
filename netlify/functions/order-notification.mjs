@@ -16,16 +16,18 @@ const esc = s => String(s ?? '')
   .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
   .replace(/"/g, '&quot;');
 
-const COUNTRY_NAMES = { AE: 'United Arab Emirates', LB: 'Lebanon' };
+const COUNTRIES = {
+  AE: { name: 'United Arab Emirates', delivery: '1–2 business days' },
+  LB: { name: 'Lebanon', delivery: '3–5 business days' }
+};
+// Orders predating Lebanon support carry no country and stored the region under
+// `emirate`; both fall back rather than rendering blank.
+const countryOf = a => COUNTRIES[a.country] || COUNTRIES.AE;
+const regionOf = a => a.region || a.emirate || '';
 
-function buildHtml(o) {
-  const c = o.customer || {};
-  const a = o.shippingAddress || {};
-  // Orders predating Lebanon support have no country and stored the region
-  // under `emirate`.
-  const country = COUNTRY_NAMES[a.country] || COUNTRY_NAMES.AE;
-  const region = a.region || a.emirate || '';
+const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
+function itemsTable(o) {
   const rows = (o.items || []).map(i => `
     <tr>
       <td style="padding:6px 10px;border-bottom:1px solid #eee;">${esc(i.name)}</td>
@@ -35,27 +37,6 @@ function buildHtml(o) {
     </tr>`).join('');
 
   return `
-  <div style="font-family:system-ui,-apple-system,sans-serif;color:#3B2323;max-width:560px;">
-    <h2 style="color:#A63A3A;margin:0 0 4px;">New order ${esc(o.id)}</h2>
-    <p style="margin:0 0 18px;color:#8A6B63;font-size:13px;">
-      ${esc(o.displayDate || '')} · ${esc(o.status || '')} · ${esc(o.paymentMethod === 'cod' ? 'Cash on Delivery' : 'Bank Transfer')}
-    </p>
-
-    <h3 style="font-size:14px;margin:0 0 6px;">Customer</h3>
-    <p style="margin:0 0 16px;font-size:14px;line-height:1.6;">
-      ${esc(c.name)}<br>
-      ${esc(c.email)}<br>
-      <strong>${esc(c.phone)}</strong>
-    </p>
-
-    <h3 style="font-size:14px;margin:0 0 6px;">Deliver to</h3>
-    <p style="margin:0 0 16px;font-size:14px;line-height:1.6;">
-      ${esc(region)}, ${esc(country)}<br>
-      ${esc(a.address)}
-      ${a.notes ? `<br><em style="color:#8A6B63;">Notes: ${esc(a.notes)}</em>` : ''}
-    </p>
-
-    <h3 style="font-size:14px;margin:0 0 6px;">Items</h3>
     <table style="border-collapse:collapse;width:100%;font-size:13px;">
       <thead>
         <tr style="text-align:left;color:#8A6B63;">
@@ -73,8 +54,78 @@ function buildHtml(o) {
       <tr><td style="color:#8A6B63;">Delivery</td><td style="text-align:right;">${Number(o.shipping) === 0 ? 'Free' : money(o.shipping)}</td></tr>
       <tr><td style="font-weight:700;padding-top:6px;">Total</td>
           <td style="text-align:right;font-weight:700;color:#A63A3A;padding-top:6px;">${money(o.total)}</td></tr>
-    </table>
-  </div>`;
+    </table>`;
+}
+
+const shell = inner =>
+  `<div style="font-family:system-ui,-apple-system,sans-serif;color:#3B2323;max-width:560px;">${inner}</div>`;
+
+// The owner's copy is a fulfilment view: it leads with the phone, because that
+// is how transfer details get sent.
+function buildOwnerHtml(o) {
+  const c = o.customer || {};
+  const a = o.shippingAddress || {};
+  return shell(`
+    <h2 style="color:#A63A3A;margin:0 0 4px;">New order ${esc(o.id)}</h2>
+    <p style="margin:0 0 18px;color:#8A6B63;font-size:13px;">
+      ${esc(o.displayDate || '')} · ${esc(o.status || '')} · ${esc(o.paymentMethod === 'cod' ? 'Cash on Delivery' : 'Bank Transfer')}
+    </p>
+
+    <h3 style="font-size:14px;margin:0 0 6px;">Customer</h3>
+    <p style="margin:0 0 16px;font-size:14px;line-height:1.6;">
+      ${esc(c.name)}<br>
+      ${esc(c.email)}<br>
+      <strong>${esc(c.phone)}</strong>
+    </p>
+
+    <h3 style="font-size:14px;margin:0 0 6px;">Deliver to</h3>
+    <p style="margin:0 0 16px;font-size:14px;line-height:1.6;">
+      ${esc(regionOf(a))}, ${esc(countryOf(a).name)}<br>
+      ${esc(a.address)}
+      ${a.notes ? `<br><em style="color:#8A6B63;">Notes: ${esc(a.notes)}</em>` : ''}
+    </p>
+
+    <h3 style="font-size:14px;margin:0 0 6px;">Items</h3>
+    ${itemsTable(o)}`);
+}
+
+// The customer's copy confirms rather than reports. The "what happens next"
+// line matters most: a transfer customer has just ordered and been told nothing
+// about how to pay.
+function buildCustomerHtml(o) {
+  const c = o.customer || {};
+  const a = o.shippingAddress || {};
+  const next = o.paymentMethod === 'cod'
+    ? `Pay the courier in cash or by card when your order arrives. Estimated delivery is ${countryOf(a).delivery}.`
+    : `We'll message you on WhatsApp at <strong>${esc(c.phone)}</strong> with the transfer details. Your pieces are reserved until payment arrives, and delivery takes around ${countryOf(a).delivery} from then.`;
+
+  return shell(`
+    <h2 style="color:#A63A3A;margin:0 0 4px;">Thank you${c.name ? `, ${esc(String(c.name).split(' ')[0])}` : ''}!</h2>
+    <p style="margin:0 0 18px;color:#8A6B63;font-size:14px;">
+      We've got your order and we're preparing it with care.
+    </p>
+
+    <div style="background:#FDF3F0;border:1px solid #F3C7CC;border-radius:12px;padding:12px 14px;margin-bottom:18px;font-size:13.5px;line-height:1.55;">
+      <strong>What happens next:</strong> ${next}
+    </div>
+
+    <p style="margin:0 0 16px;font-size:14px;">
+      <span style="color:#8A6B63;">Order</span> <strong>${esc(o.id)}</strong>
+    </p>
+
+    <h3 style="font-size:14px;margin:0 0 6px;">Delivering to</h3>
+    <p style="margin:0 0 16px;font-size:14px;line-height:1.6;">
+      ${esc(regionOf(a))}, ${esc(countryOf(a).name)}<br>
+      ${esc(a.address)}
+    </p>
+
+    <h3 style="font-size:14px;margin:0 0 6px;">Your order</h3>
+    ${itemsTable(o)}
+
+    <p style="margin:20px 0 0;font-size:12.5px;color:#8A6B63;line-height:1.6;">
+      Something not right? Just reply to this email and we'll sort it out.<br>
+      <a href="https://dinasstudio.com" style="color:#A63A3A;">dinasstudio.com</a>
+    </p>`);
 }
 
 export default async (req) => {
@@ -104,24 +155,49 @@ export default async (req) => {
   }
   if (!order || !order.id) return new Response('No order in payload', { status: 400 });
 
-  const res = await fetch('https://api.resend.com/emails', {
-    method: 'POST',
-    headers: {
-      Authorization: `Bearer ${RESEND_API_KEY}`,
-      'Content-Type': 'application/json'
-    },
-    body: JSON.stringify({
-      from: "Dina's Studio <orders@dinasstudio.com>",
-      to: NOTIFY_TO.split(',').map(s => s.trim()).filter(Boolean),
-      subject: `New order ${order.id} — ${money(order.total)}`,
-      html: buildHtml(order)
-    })
-  });
+  const owners = NOTIFY_TO.split(',').map(s => s.trim()).filter(Boolean);
 
-  if (!res.ok) {
+  const send = async payload => {
+    const res = await fetch('https://api.resend.com/emails', {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${RESEND_API_KEY}`,
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify({ from: "Dina's Studio <orders@dinasstudio.com>", ...payload })
+    });
     // Deliberately logs status only — never the customer record.
-    console.error('Resend rejected the send:', res.status, await res.text());
+    if (!res.ok) throw new Error(`Resend ${res.status}: ${(await res.text()).slice(0, 200)}`);
+  };
+
+  // The owner's notification is the one that costs money if it goes missing, so
+  // it sends first and is the only one whose failure is reported to Supabase.
+  try {
+    await send({
+      to: owners,
+      subject: `New order ${order.id} — ${money(order.total)}`,
+      html: buildOwnerHtml(order)
+    });
+  } catch (e) {
+    console.error('Owner notification failed:', e.message);
     return new Response('Send failed', { status: 502 });
+  }
+
+  // Best effort: a bounced customer address must never mask a real order.
+  const customerEmail = String((order.customer || {}).email || '').trim();
+  if (EMAIL_RE.test(customerEmail)) {
+    try {
+      await send({
+        to: [customerEmail],
+        reply_to: owners[0],
+        subject: `Your Dina's Studio order ${order.id}`,
+        html: buildCustomerHtml(order)
+      });
+    } catch (e) {
+      console.error('Customer confirmation failed for', order.id, '-', e.message);
+    }
+  } else {
+    console.warn('No usable customer email on order', order.id);
   }
 
   console.log('Notified for order', order.id);
