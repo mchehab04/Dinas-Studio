@@ -67,6 +67,10 @@ Getting this wrong breaks live checkout for every customer.
 - **The Supabase publishable key in `js/supabaseClient.js` is meant to be public.** Row-level security is what protects the data; this was verified from outside.
 - Design specs for every major feature are in `docs/superpowers/specs/`.
 
-## Hosting decision (open)
+## Hosting decision
 
-Recorded here once decided.
+**Moving to Cloudflare Pages** — free, commercial use allowed, 500 builds a month. Vercel was ruled out because its free plan forbids commercial use.
+
+The code is prepared (site in `public/`, function in `functions/api/` + `lib/`). Follow [`CLOUDFLARE-MIGRATION.md`](CLOUDFLARE-MIGRATION.md) phase by phase — **freeze Netlify builds before pushing**, or the next Netlify build publishes a site with no `index.html`.
+
+After the move, the Netlify-specific notes above no longer apply: functions live in `functions/`, where Cloudflare turns every file into a route, so the same rule holds — keep tests and shared code out of it.
