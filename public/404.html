@@ -1,0 +1,58 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+  <title>Page not found | Dina's Studio</title>
+  <!-- Cloudflare Pages serves this with a real 404 status. Without it, every
+       unknown path answered with the homepage and a 200, which Google logs as
+       a soft 404 and which made /favicon.ico return HTML. -->
+  <meta name="robots" content="noindex">
+  <link rel="icon" href="/favicon.ico" sizes="48x48 96x96 144x144">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link
+    href="https://fonts.googleapis.com/css2?family=Baloo+2:wght@600;700&family=Caveat:wght@600&family=Nunito+Sans:wght@400;600&display=swap"
+    rel="stylesheet">
+  <link rel="stylesheet" href="/css/styles.css">
+  <style>
+    .nf {
+      min-height: 100vh;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      gap: 18px;
+      padding: 32px 16px;
+      text-align: center;
+    }
+
+    .nf img { width: 96px; height: 96px; border-radius: 16px; object-fit: contain; }
+    .nf h1 { font-size: clamp(28px, 7vw, 40px); }
+    .nf p { color: var(--ink-soft); max-width: 42ch; margin: 0; line-height: 1.6; }
+
+    .nf a {
+      background: var(--primary);
+      color: #fff;
+      text-decoration: none;
+      font-weight: 600;
+      padding: 14px 28px;
+      border-radius: var(--radius-md);
+      box-shadow: var(--shadow);
+    }
+
+    .nf a:hover { background: var(--primary-dark); }
+  </style>
+</head>
+
+<body>
+  <main class="nf">
+    <img src="/Logo.jpeg" alt="Dina's Studio">
+    <h1>This page went missing</h1>
+    <p class="script" style="font-size:22px">but the wardrobe is still here</p>
+    <p>The link may be old or mistyped. Everything we make lives on the home page.</p>
+    <a href="/">Back to the shop</a>
+  </main>
+</body>
+
+</html>
