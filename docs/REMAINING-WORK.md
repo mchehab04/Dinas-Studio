@@ -19,15 +19,15 @@ The site is live at **https://dinasstudio.com**: a static HTML/CSS/JS storefront
 
 Full migration record: [`CLOUDFLARE-MIGRATION.md`](CLOUDFLARE-MIGRATION.md).
 
-## Setup steps asked for but not confirmed done
+## Supabase setup — done
 
-- [ ] **Run `supabase/profiles-email-integrity.sql`** — adds the unique constraint on `profiles.email` and the trigger that keeps it in step with auth.
-- [ ] **Confirm "Confirm email" is ON** in Supabase → Authentication → Sign In / Providers → Email. The client handling is deployed, but signup behaves the old way until this is on.
+- [x] `supabase/profiles-email-integrity.sql` has been run (unique `profiles.email`, kept in step with auth).
+- [x] "Confirm email" is on.
 
 ## Small cleanups, post-migration
 
-- [ ] **Search Console:** remove the old URL-prefix property for `fanciful-dragon-ec8169.netlify.app`, which no longer exists.
-- [ ] **`public/index.html`:** remove the `google-site-verification` meta tag with content `Id7ib6p68…`. It served only that old property; the live Domain property is verified by DNS.
+- [x] **Search Console:** old URL-prefix property for `fanciful-dragon-ec8169.netlify.app` removed.
+- [ ] **`public/index.html`:** remove the `google-site-verification` meta tag with content `Id7ib6p68…`. It served only that removed property; the live Domain property is verified by DNS.
 - [ ] **Optional:** add `public/404.html`. Pages currently answers any unknown path with the homepage and a 200, which Google can report as soft 404s. Nothing relies on that fallback — navigation uses `#` hashes.
 
 ## Next up: stock, pricing and restock notifications
