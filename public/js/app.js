@@ -912,11 +912,25 @@ async function placeOrder() {
   state.bag = [];
   storageService.saveCart([]);
   updateBagBadge();
+  markPiecesSold(order);
   await rememberPhone(orderPayload.customer.phone);
 
   closeAllSheets();
   renderOrderSuccess(order);
   openSheet('orderSuccessSheet');
+}
+
+// place_order marked these sold in the same transaction that took the order.
+// Mirroring it here — exactly as the admin stock control does — means the grid
+// reads Sold Out the moment the order goes through, instead of after a reload.
+function markPiecesSold(order){
+  (order && order.items || []).forEach(i => {
+    const p = PRODUCTS.find(x => x.id === i.productId);
+    if(p){ p.stock = 'out'; p.soldOut = [...(p.sizes || [])]; }
+  });
+  storageService.saveProducts(PRODUCTS);
+  lastGridSignature = null;
+  renderGrid();
 }
 
 // A bag can sit open for days, so by checkout a piece may be gone. place_order

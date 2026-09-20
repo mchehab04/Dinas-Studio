@@ -83,6 +83,26 @@ if (/Add to Bag/.test(addLabel)) {
     stale.toast.includes(stale.name) && /just bought by someone else/.test(stale.toast));
 }
 
+// A piece sold must read Sold Out straight away. The grid skips rebuilds when
+// the visible ids haven't changed, so a stock change that doesn't clear the
+// signature would sit there looking In Stock until a reload.
+const sold = await page.evaluate(() => {
+  const p = PRODUCTS.find(x => x.stock !== 'out');
+  if (!p) return { skip: true };
+  markPiecesSold({ items: [{ productId: p.id }] });
+  const card = [...document.querySelectorAll('.card')].find(c => c.innerText.includes(p.name));
+  const tag = card && card.querySelector('.stock-tag');
+  return { name: p.name, stock: p.stock, soldOut: (p.soldOut || []).length,
+           tag: tag ? tag.textContent.trim() : '(no card)' };
+});
+if (sold.skip) {
+  check('SKIP  every piece is already sold out', true);
+} else {
+  check(`the sold piece flips to out (${sold.name})`, sold.stock === 'out');
+  check('its sizes are marked sold', sold.soldOut > 0);
+  check(`the grid says so without a reload (tag: "${sold.tag}")`, sold.tag === 'Sold Out');
+}
+
 check('no console errors', errors.length === 0);
 console.log(out.join('\n'));
 if (errors.length) console.log('\nconsole errors:\n' + errors.join('\n'));
