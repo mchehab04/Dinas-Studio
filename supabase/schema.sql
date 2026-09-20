@@ -1,6 +1,12 @@
 -- ============================================================
 -- Dina's Studio: profiles, products, orders + RLS
 -- Run once in Supabase Dashboard > SQL Editor > New query > Run
+--
+-- On a fresh database, run these after it, in order:
+--   product-images-bucket.sql   storage for product photos
+--   profiles-email-integrity.sql
+--   place-order.sql             REQUIRED — checkout calls place_order, and
+--                               nothing below grants a direct insert into orders
 -- ============================================================
 
 -- ---------- profiles ----------
@@ -129,9 +135,9 @@ create table public.orders (
 
 alter table public.orders enable row level security;
 
-create policy "orders_insert_own"
-  on public.orders for insert
-  with check (auth.uid() = "userId");
+-- No insert policy and no insert grant: orders are created only by
+-- public.place_order (see place-order.sql), which claims the pieces and prices
+-- the order in one transaction. A direct insert could do neither.
 
 create policy "orders_select_own_or_admin"
   on public.orders for select
@@ -151,4 +157,4 @@ grant insert, update on public.products to authenticated;
 
 grant select, update on public.profiles to authenticated;
 
-grant select, insert, update on public.orders to authenticated;
+grant select, update on public.orders to authenticated;

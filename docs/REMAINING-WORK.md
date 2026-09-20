@@ -1,6 +1,6 @@
 # Remaining work — Dina's Studio
 
-Handoff for picking this project up in a later session. Last updated 2026-09-17, after the move to Cloudflare Pages.
+Handoff for picking this project up in a later session. Last updated 2026-09-21.
 
 ## Where things stand
 
@@ -31,28 +31,24 @@ Full migration record: [`CLOUDFLARE-MIGRATION.md`](CLOUDFLARE-MIGRATION.md).
 - [x] **`public/404.html` added.** Unknown paths now return a real 404 instead of the homepage with a 200.
 - [x] **Favicon.** `/favicon.ico` was answered by the SPA fallback — HTML with a 200 — so Google showed a placeholder globe instead of the logo. Real `public/favicon.ico` (48/96/144px) and `public/icon-192.png` now sit at the probed paths, with root-relative link tags. Google refreshes favicons on its own schedule, days to weeks after the deploy.
 
-## Next up: stock, pricing and restock notifications
+## Stock and pricing — built, waiting to be rolled out
 
-Fully designed, not built. Spec: [`docs/superpowers/specs/2026-09-17-stock-and-restock-design.md`](superpowers/specs/2026-09-17-stock-and-restock-design.md).
+Part 1 and Part 2 of [the spec](superpowers/specs/2026-09-17-stock-and-restock-design.md) are written and tested locally. **Nothing is live until the steps below are done, in this order.**
 
-In short:
+What changed: `public.place_order` claims each piece and prices the order inside one transaction, so two customers cannot buy the same one-of-a-kind piece and the browser can no longer decide what it pays. Quantity is gone from the product page and the bag — a piece is in the bag or it isn't. A bag that goes stale names the piece that went and drops it.
 
-- A `place_order` Postgres function makes checkout atomic, so two customers cannot buy the same one-of-a-kind piece. It marks pieces sold out on order and **recomputes prices server-side**, since totals are currently trusted from the browser.
-- The quantity stepper is removed from product detail and the bag — every piece is one of a kind.
-- "Notify Me" becomes real: a `restock_requests` table taking email and/or phone, automatic emails when a piece comes back in stock, and an admin waiting list with `wa.me` links for phone-only requests.
-- A bag that goes stale at checkout names the piece someone else bought and offers Notify Me.
+### Rollout — the order matters
 
-The spec was written while the site was on Netlify. Two things change on Cloudflare: the restock function goes in `functions/api/` with its logic in `lib/`, and `SUPABASE_SERVICE_ROLE_KEY` goes into Pages' environment variables as a secret.
+1. **Now, safe on the live site:** run `supabase/place-order.sql`. It only adds a function; the deployed checkout keeps inserting directly and is unaffected.
+2. **Optional, also safe:** run `supabase/verify-place-order.sql`. It tests against real data inside a transaction it rolls back, and prints PASS/FAIL notices.
+3. **Deploy** the client changes (push — one build).
+4. **Only after that deploy is live**, run `supabase/lock-direct-order-inserts.sql`. It revokes direct inserts into `orders`. Run before step 3 and live checkout breaks for every customer until the next deploy.
 
-### Rollout order is critical
+To confirm step 3 landed before doing step 4: place a real test order. If the piece flips to Sold Out on its own, `place_order` is in use.
 
-Getting this wrong breaks live checkout for every customer.
+### Still to build — Part 3, restock notifications
 
-1. Run the **additive** SQL (function, table, policies). Safe on the live site.
-2. Deploy the client changes.
-3. **Only after that deploy is live**, run the SQL that revokes direct inserts into `orders`. The currently deployed checkout inserts directly; revoking first breaks it.
-4. Add `SUPABASE_SERVICE_ROLE_KEY` to Pages as a secret. This key bypasses RLS entirely.
-5. Create the webhook `on_product_restocked` on `products` UPDATE.
+"Notify Me" still only writes to `localStorage`, so nothing is ever sent. Unreachable until the first piece actually sells out, which is why it was left for second. Needs: the `restock_requests` table, a form in place of the `prompt()`, a `functions/api/restock-notification.js` on a `products` UPDATE webhook, `SUPABASE_SERVICE_ROLE_KEY` as a Pages secret, and the admin waiting list. Full detail in the spec.
 
 ## Remaining concerns after that
 
@@ -68,6 +64,7 @@ Getting this wrong breaks live checkout for every customer.
 - **Functions read `env`, not `process.env`.** Workers have no `process.env`; `lib/order-notification.js` takes `env` as an argument.
 - **Test locally on Cloudflare's runtime before pushing:** `npx wrangler pages dev public --binding RESEND_API_KEY=test NOTIFY_TO=a@x.com WEBHOOK_SECRET=test`. A pass under plain Node once hid a real bundling failure.
 - **Run the function test with** `node tests/order-notification.test.mjs` (37 checks, no framework).
+- **`tests/bag-smoke.mjs`** drives the real storefront in a browser for the bag and stale-bag behaviour (14 checks). It needs a local static server and Playwright; the header says how. Playwright is deliberately not a project dependency.
 - **Resend's DNS records now live in Cloudflare DNS:** TXT and MX on `send`, TXT on `resend._domainkey`, TXT on `_dmarc`. Cloudflare's import skipped the `send` records at first. If DNS ever moves again, recreate them before switching nameservers, or every email stops with nothing visibly wrong.
 - **Keep email-related DNS records grey (DNS only).**
 - **The Search Console TXT record on `@` must stay permanently** — deleting it un-verifies the property.

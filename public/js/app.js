@@ -206,17 +206,20 @@ const apiService = {
     storageService.saveProducts(PRODUCTS);
     return data;
   },
+  // place_order claims each piece and prices the order inside one transaction,
+  // so two shoppers cannot buy the same one-of-a-kind piece and nothing the
+  // browser says about money is trusted. The bag only names which pieces.
+  // It throws 'sold_out:<name>|<name>' when someone else got there first.
   async createOrder(orderPayload) {
-    const { data: { user } } = await supabaseClient.auth.getUser();
     const randomNum = Math.floor(1000 + Math.random() * 9000);
-    const order = {
-      id: `DS-${randomNum}`,
-      userId: user.id,
-      displayDate: new Date().toLocaleDateString('en-AE', { day:'numeric', month:'short', year:'numeric' }),
-      status: 'pending',
-      ...orderPayload
-    };
-    const { data, error } = await supabaseClient.from('orders').insert(order).select().single();
+    const { data, error } = await supabaseClient.rpc('place_order', {
+      p_id: `DS-${randomNum}`,
+      p_display_date: new Date().toLocaleDateString('en-AE', { day:'numeric', month:'short', year:'numeric' }),
+      p_customer: orderPayload.customer,
+      p_shipping_address: orderPayload.shippingAddress,
+      p_payment_method: orderPayload.paymentMethod,
+      p_items: orderPayload.items
+    });
     if(error) throw error;
     return data;
   },
@@ -453,9 +456,8 @@ function quickAdd(id){
     return;
   }
   // Never add straight to the bag from the grid — open the piece so the shopper
-  // picks quantity (and size, where there's a choice) deliberately.
+  // sees it, and picks a size where there's a choice.
   openProduct(id);
-  showToast("Choose your quantity to add");
 }
 
 /* ========================= WISHLIST ========================= */
@@ -515,14 +517,12 @@ function renderWishlist(){
 /* ========================= PRODUCT DETAIL ========================= */
 let currentProduct = null;
 let currentSize = null;
-let currentQty = 1;
 let currentSlide = 0;
 
 function openProduct(id){
   currentProduct = PRODUCTS.find(x=>x.id===id);
   if(!currentProduct) return;
   currentSize = currentProduct.sizes.find(s=>!currentProduct.soldOut.includes(s)) || currentProduct.sizes[0];
-  currentQty = 1;
   currentSlide = 0;
   renderProductDetail();
   openSheet('pdSheet');
@@ -574,13 +574,6 @@ function renderProductDetail(){
         }).join('')}
       </div>
 
-      <div class="pd-section-label">Quantity</div>
-      <div class="qty-row">
-        <button class="qty-btn" onclick="changeQty(-1)">−</button>
-        <span class="qty-val" id="qtyVal">${currentQty}</span>
-        <button class="qty-btn" onclick="changeQty(1)">+</button>
-      </div>
-
       <div class="spec-list">
         <div class="spec-item">
           <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M20.38 3.46 16 2a4 4 0 0 1-8 0L3.62 3.46a2 2 0 0 0-1.34 2.23l.58 3.47a1 1 0 0 0 .99.84H6v10c0 1.1.9 2 2 2h8a2 2 0 0 0 2-2V10h2.15a1 1 0 0 0 .99-.84l.58-3.47a2 2 0 0 0-1.34-2.23z"/></svg>
@@ -628,9 +621,8 @@ function selectSize(s){
     btn.classList.toggle('selected', btn.dataset.size===s);
   });
 }
-function changeQty(d){ currentQty = Math.max(1, currentQty+d); document.getElementById('qtyVal').textContent = currentQty; }
 function addCurrentToBag(){
-  addToBag(currentProduct.id, currentSize, currentQty);
+  addToBag(currentProduct.id, currentSize);
   closeAllSheets();
 }
 
@@ -646,10 +638,16 @@ function notifyMeForCurrentProduct(){
 }
 
 /* ========================= BAG ========================= */
-function addToBag(id, size, qty){
-  const existing = state.bag.find(i=>i.productId===id && i.size===size);
-  if(existing){ existing.qty += qty; }
-  else { state.bag.push({productId:id, size, qty}); }
+// The only way into the bag, so the sold-out guard lives here rather than at
+// each caller. One of a kind: a piece is in the bag or it isn't.
+function addToBag(id, size){
+  const p = PRODUCTS.find(x=>x.id===id);
+  if(!p || p.stock === "out"){ showToast("This piece is currently sold out"); return; }
+  if(state.bag.some(i=>i.productId===id && i.size===size)){
+    showToast("Already in your bag");
+    return;
+  }
+  state.bag.push({productId:id, size});
   storageService.saveCart(state.bag);
   updateBagBadge();
   showToast("Added to your bag ✓");
@@ -666,7 +664,7 @@ function addToBag(id, size, qty){
 }
 
 function updateBagBadge(){
-  const count = state.bag.reduce((s,i)=>s+i.qty,0);
+  const count = state.bag.length;
   const b1 = document.getElementById('bagBadge');
   const b2 = document.getElementById('navBagBadge');
   [b1,b2].forEach(b=>{
@@ -681,12 +679,6 @@ function updateWishBadge(){
   if(!b) return;
   b.style.display = state.wishlist.size>0 ? 'flex':'none';
   b.textContent = state.wishlist.size;
-}
-function bagQtyChange(idx, d){
-  state.bag[idx].qty += d;
-  if(state.bag[idx].qty<=0) state.bag.splice(idx,1);
-  storageService.saveCart(state.bag);
-  updateBagBadge(); renderBag();
 }
 function removeBagItem(idx){
   state.bag.splice(idx,1);
@@ -706,7 +698,7 @@ function renderBag(){
   const itemsHtml = state.bag.map((item, idx)=>{
     const p = PRODUCTS.find(x=>x.id===item.productId);
     if(!p) return '';
-    subtotal += p.price * item.qty;
+    subtotal += p.price;
     return `
       <div class="bag-item">
         <div class="bag-thumb" style="${productThumbStyle(p)}">${productMedia(p)}</div>
@@ -714,12 +706,7 @@ function renderBag(){
           <span class="bag-name">${p.name}</span>
           <span class="bag-meta">Size ${item.size}</span>
           <div class="bag-bottom">
-            <div class="bag-qty">
-              <button onclick="bagQtyChange(${idx},-1)">−</button>
-              <span>${item.qty}</span>
-              <button onclick="bagQtyChange(${idx},1)">+</button>
-            </div>
-            <span class="bag-price">${formatPrice(p.price*item.qty)}</span>
+            <span class="bag-price">${formatPrice(p.price)}</span>
           </div>
           <button class="remove-x" onclick="removeBagItem(${idx})">Remove</button>
         </div>
@@ -796,7 +783,7 @@ function renderCheckout() {
   let subtotal = 0;
   state.bag.forEach(item => {
     const p = PRODUCTS.find(x => x.id === item.productId);
-    if(p) subtotal += p.price * item.qty;
+    if(p) subtotal += p.price;
   });
   const shipping = shippingFor(subtotal, state.country);
   const total = subtotal + shipping;
@@ -809,7 +796,7 @@ function renderCheckout() {
   el.innerHTML = `
     <div class="checkout-section">
       <div style="background:var(--surface-alt); border:1px solid var(--line); border-radius:var(--radius-sm); padding:10px 14px; margin-bottom:18px; font-size:12.5px; color:var(--ink-soft); display:flex; justify-content:space-between; align-items:center;">
-        <span>Ordering ${state.bag.reduce((s,i)=>s+i.qty,0)} items</span>
+        <span>Ordering ${state.bag.length} ${state.bag.length === 1 ? 'piece' : 'pieces'}</span>
         <strong style="color:var(--primary);">${formatPrice(total)}</strong>
       </div>
 
@@ -904,39 +891,20 @@ async function placeOrder() {
     return;
   }
 
-  let subtotal = 0;
-  const items = state.bag.map(item => {
-    const p = PRODUCTS.find(x => x.id === item.productId);
-    const itemSub = (p ? p.price : 0) * item.qty;
-    subtotal += itemSub;
-    return {
-      productId: item.productId,
-      name: p ? p.name : 'Custom Piece',
-      cat: p ? p.cat : 'Collection',
-      size: item.size,
-      qty: item.qty,
-      price: p ? p.price : 0,
-      total: itemSub
-    };
-  });
-
-  const shipping = shippingFor(subtotal, state.country);
-  const total = subtotal + shipping;
-
+  // Names, prices and totals are all filled in by the database. Sending them
+  // from here is what let a tampered request set its own price.
   const orderPayload = {
     customer: { name, email, phone: phoneE164(phone, state.country) },
     shippingAddress: { country: state.country, region, address, notes },
     paymentMethod: state.paymentMethod,
-    items,
-    subtotal,
-    shipping,
-    total
+    items: state.bag.map(item => ({ productId: item.productId, size: item.size }))
   };
 
   let order;
   try {
     order = await apiService.createOrder(orderPayload);
   } catch(e) {
+    if(await dropSoldOutFromBag(e)) return;
     showToast("Couldn't place your order — please try again");
     return;
   }
@@ -949,6 +917,31 @@ async function placeOrder() {
   closeAllSheets();
   renderOrderSuccess(order);
   openSheet('orderSuccessSheet');
+}
+
+// A bag can sit open for days, so by checkout a piece may be gone. place_order
+// refuses the whole order rather than quietly dropping lines. The names it
+// raises are for the message only — the bag is rebuilt from freshly read stock,
+// since matching names back to pieces would break on two pieces sharing one.
+async function dropSoldOutFromBag(e){
+  const m = /sold_out:(.+)/.exec((e && e.message) || '');
+  if(!m) return false;
+  const names = m[1].split('|');
+
+  try { PRODUCTS = await apiService.fetchProducts(); } catch(_){}
+  state.bag = state.bag.filter(i => {
+    const p = PRODUCTS.find(x => x.id === i.productId);
+    return p && p.stock !== 'out';
+  });
+  storageService.saveCart(state.bag);
+  updateBagBadge();
+  lastGridSignature = null;
+  renderGrid();
+
+  closeAllSheets();
+  if(state.bag.length > 0) openBag();
+  showToast(`Sorry — ${names.join(' and ')} ${names.length > 1 ? 'were' : 'was'} just bought by someone else`);
+  return true;
 }
 
 // Checkout is the only place a phone number is captured, so the first order

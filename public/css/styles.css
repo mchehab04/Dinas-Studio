@@ -466,8 +466,6 @@
   }
   .size-pill.active{border-color:var(--primary); background:var(--primary); color:#fff;}
   .size-pill.disabled{opacity:0.35; text-decoration:line-through;}
-  .qty-row{display:flex; align-items:center; gap:14px; margin-top:10px;}
-  .qty-btn{width:44px; height:44px; border-radius:50%; border:1.5px solid var(--line); background:var(--surface); font-size:16px; font-weight:700; color:var(--primary);}
   .pd-footer{
     display:flex; gap:12px; padding:16px 22px 4px; align-items:center;
   }
@@ -500,8 +498,6 @@
   .bag-name{font-size:13.5px; font-weight:700;}
   .bag-meta{font-size:11.5px; color:var(--ink-faint);}
   .bag-bottom{display:flex; align-items:center; justify-content:space-between; margin-top:4px;}
-  .bag-qty{display:flex; align-items:center; gap:10px;}
-  .bag-qty button{width:24px; height:24px; border-radius:50%; border:1px solid var(--line); background:var(--surface); font-size:13px; color:var(--primary);}
   .bag-price{font-weight:800; color:var(--primary); font-size:13.5px;}
   .remove-x{background:none; border:none; color:var(--ink-faint); font-size:11px; text-decoration:underline; margin-top:2px; align-self:flex-start;}
   .bag-summary{padding:16px 20px 6px;}
