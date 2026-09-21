@@ -42,11 +42,25 @@ Parts 1 and 2 of [the spec](superpowers/specs/2026-09-17-stock-and-restock-desig
 
 To re-check any of it: `supabase/verify-place-order.sql` tests against real data inside a transaction it rolls back.
 
-## Next up — Part 3, restock notifications
+## Restock notifications — built, waiting to be rolled out
 
-"Notify Me" still only writes to `localStorage`, so nothing is ever sent. It was left for second because nothing could sell out; now pieces do, so it is reachable and a sold-out piece is currently a dead end.
+Part 3 of [the spec](superpowers/specs/2026-09-17-stock-and-restock-design.md). Built and tested locally; **nothing sends until every step below is done.**
 
-Needs: the `restock_requests` table, a form in place of the `prompt()`, a `functions/api/restock-notification.js` on a `products` UPDATE webhook, `SUPABASE_SERVICE_ROLE_KEY` as a Pages secret, and the admin waiting list. Full detail in the spec.
+"Notify Me" is now a real form (email and/or phone, either one is enough, pre-filled when signed in) writing to `public.restock_requests`. It is offered from a sold-out piece and automatically when a bag goes stale at checkout. When a piece goes from Sold Out back to In Stock, a webhook emails everyone waiting and marks them notified. Requests left with only a phone number are listed in the admin inventory under **Waiting (n)**, each with a WhatsApp link and a Mark contacted button, because there is no messaging API.
+
+### Rollout, in this order
+
+1. **Now, safe on the live site:** run `supabase/restock-requests.sql`. It only adds a table; nothing reads it until the new client ships.
+2. **Deploy** the client (push — one build). Before this, the form has no table to write to.
+3. **Cloudflare Pages → Settings → Variables and Secrets (Production)**, add:
+   - `SUPABASE_URL` — `https://ciwahcmsjcywakwhtsle.supabase.co`, plain text (it is public already).
+   - `SUPABASE_SERVICE_ROLE_KEY` — Supabase → Settings → API → service_role. **Secret.** This key bypasses RLS on every table; it belongs nowhere else, and never in the repo.
+   - Then **retry the latest production deployment** — variables only reach deployments created after they are added.
+4. **Supabase → Database → Webhooks → Create:** name `on_product_restocked`, table `public.products`, event **UPDATE** only, URL `https://dinas-studio.pages.dev/api/restock-notification`, header `x-webhook-secret` set to the same `WEBHOOK_SECRET` the order webhook uses.
+
+To check it end to end: join the waiting list for a piece, set that piece to Sold Out, then back to In Stock. The email should arrive and the name should disappear from the Waiting list.
+
+**The function ignores everything except Sold Out → in stock.** A price edit, new photos, or a piece going out of stock all arrive at the same webhook and must not send — that is the single most important behaviour here, and `tests/restock-notification.test.mjs` covers each case.
 
 ## Remaining concerns after that
 
@@ -63,8 +77,8 @@ Needs: the `restock_requests` table, a form in place of the `prompt()`, a `funct
 - **Every file in `functions/` becomes a route.** Keep tests and shared code out of it — logic lives in `lib/`, and `functions/api/` holds only thin adapters. The Netlify equivalent of this mistake once broke a build.
 - **Functions read `env`, not `process.env`.** Workers have no `process.env`; `lib/order-notification.js` takes `env` as an argument.
 - **Test locally on Cloudflare's runtime before pushing:** `npx wrangler pages dev public --binding RESEND_API_KEY=test NOTIFY_TO=a@x.com WEBHOOK_SECRET=test`. A pass under plain Node once hid a real bundling failure.
-- **Run the function test with** `node tests/order-notification.test.mjs` (37 checks, no framework).
-- **`tests/ui-smoke.mjs`** drives the real storefront in a browser for the bag, the stale-bag path and the admin's paid accounting (22 checks). It needs a local static server and Playwright; the header says how. Playwright is deliberately not a project dependency.
+- **Run the function tests with** `node tests/order-notification.test.mjs` (41 checks) and `node tests/restock-notification.test.mjs` (33 checks). No framework, no dependencies.
+- **`tests/ui-smoke.mjs`** drives the real storefront in a browser for the bag, the stale-bag path and the admin's paid accounting, Notify Me and the waiting list (36 checks). It needs a local static server and Playwright; the header says how. Playwright is deliberately not a project dependency.
 - **Resend's DNS records now live in Cloudflare DNS:** TXT and MX on `send`, TXT on `resend._domainkey`, TXT on `_dmarc`. Cloudflare's import skipped the `send` records at first. If DNS ever moves again, recreate them before switching nameservers, or every email stops with nothing visibly wrong.
 - **Keep email-related DNS records grey (DNS only).**
 - **The Search Console TXT record on `@` must stay permanently** — deleting it un-verifies the property.

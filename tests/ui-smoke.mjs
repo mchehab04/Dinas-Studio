@@ -130,6 +130,88 @@ check('every order gets a paid control', admin.toggles === 2);
 check('only the paid one reads as paid', admin.markedPaid === 1);
 check('the unpaid one offers Mark paid', /Mark paid/.test(admin.text));
 
+// Notify Me: a real form in place of the prompt(), where either contact
+// detail will do but neither alone is demanded.
+const notify = await page.evaluate(async () => {
+  const out = {};
+  const p = PRODUCTS[0];
+  openNotifyMe(p.id);
+  const sub = document.getElementById('nmSubmit');
+  out.opened = !!document.getElementById('nmEmail') && !!document.getElementById('nmPhone');
+  out.startsDisabled = sub.disabled;
+
+  const email = document.getElementById('nmEmail');
+  const phone = document.getElementById('nmPhone');
+  const type = (el, v) => { el.value = v; el.dispatchEvent(new Event('input', { bubbles: true })); };
+
+  type(email, 'not-an-email');
+  out.badEmailBlocks = sub.disabled;
+  type(email, 'someone@example.com');
+  out.emailAloneEnables = !sub.disabled;
+
+  type(email, '');
+  type(phone, '050 123 4567');
+  out.phoneAloneEnables = !sub.disabled;
+
+  type(phone, '123');
+  out.badPhoneBlocks = sub.disabled;
+
+  // What actually gets sent, without writing to the database.
+  type(phone, '050 123 4567');
+  type(email, 'someone@example.com');
+  let sent = null;
+  const real = apiService.createRestockRequest;
+  apiService.createRestockRequest = async payload => { sent = payload; return 'ok'; };
+  await submitNotifyRequest();
+  apiService.createRestockRequest = real;
+  out.sent = sent;
+  out.toast = document.getElementById('toast').textContent;
+  return out;
+});
+check('Notify Me opens a form with both fields', notify.opened);
+check('it starts disabled with nothing filled in', notify.startsDisabled);
+check('an invalid email blocks it', notify.badEmailBlocks);
+check('an email alone is enough', notify.emailAloneEnables);
+check('a phone alone is enough', notify.phoneAloneEnables);
+check('an invalid phone blocks it', notify.badPhoneBlocks);
+check(`the phone is sent in E.164 (${notify.sent && notify.sent.phone})`,
+  notify.sent && notify.sent.phone === '+971501234567');
+check('the email is sent as typed', notify.sent && notify.sent.email === 'someone@example.com');
+check(`the shopper is told ("${notify.toast}")`, /let you know when it's back/i.test(notify.toast));
+
+// The admin waiting list, driven with stand-in requests.
+const adminWaiting = await page.evaluate(async () => {
+  const p = PRODUCTS[0];
+  const realOrders = apiService.getOrders;
+  const realReqs = apiService.getRestockRequests;
+  apiService.getOrders = async () => [];
+  apiService.getRestockRequests = async () => ([
+    { id: 1, product_id: p.id, email: 'mail@x.com', phone: null, created_at: '2026-09-20T09:00:00Z', notified_at: null },
+    { id: 2, product_id: p.id, email: null, phone: '+971501234567', created_at: '2026-09-20T09:00:00Z', notified_at: null }
+  ]);
+  waitingProduct = p;
+  adminTab = 'waiting';
+  await renderAdmin();
+  const el = document.getElementById('adminContent');
+  const res = {
+    text: el.innerText,
+    waLink: (el.querySelector('.waiting-contact a') || {}).href,
+    byHand: el.querySelectorAll('.waiting-tag').length,
+    markButtons: [...el.querySelectorAll('button')].filter(b => /Mark contacted/.test(b.textContent)).length
+  };
+  adminTab = 'inventory';
+  await renderAdmin();
+  res.inventoryText = document.getElementById('adminContent').innerText;
+  apiService.getOrders = realOrders;
+  apiService.getRestockRequests = realReqs;
+  return res;
+});
+check('the waiting list shows both people', /mail@x\.com/.test(adminWaiting.text) && /\+971501234567/.test(adminWaiting.text));
+check(`the number is a WhatsApp link (${adminWaiting.waLink})`, adminWaiting.waLink === 'https://wa.me/971501234567');
+check('only the phone-only one is flagged to message by hand', adminWaiting.byHand === 1);
+check('each waiting person can be marked contacted', adminWaiting.markButtons === 2);
+check('inventory shows the count', /Waiting \(2\)/.test(adminWaiting.inventoryText));
+
 check('no console errors', errors.length === 0);
 console.log(out.join('\n'));
 if (errors.length) console.log('\nconsole errors:\n' + errors.join('\n'));

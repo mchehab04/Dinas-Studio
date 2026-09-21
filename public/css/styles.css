@@ -987,6 +987,42 @@ button:disabled {
   background: rgba(122, 155, 110, 0.12);
   color: var(--success);
 }
+
+/* Waiting lists (restock requests) */
+.waiting-btn {
+  border-color: var(--accent-deep);
+  color: var(--accent-deep);
+}
+.waiting-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.waiting-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  flex-wrap: wrap;
+  background: var(--surface-alt);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  padding: 10px 12px;
+}
+.waiting-contact {
+  font-size: 13px;
+  font-weight: 600;
+  word-break: break-all;
+}
+.waiting-contact a { color: var(--primary); }
+.waiting-tag {
+  font-size: 10.5px;
+  font-weight: 700;
+  text-transform: uppercase;
+  color: var(--gold);
+  margin-left: 6px;
+  white-space: nowrap;
+}
 .order-row-card {
   background: var(--surface);
   border: 1px solid var(--line);

@@ -124,19 +124,6 @@ const storageService = {
   saveWishlist(list) {
     try { localStorage.setItem('dinas_wishlist', JSON.stringify(Array.from(list))); } catch(e){}
   },
-  getNotifyRequests() {
-    try {
-      const data = localStorage.getItem('dinas_notify_requests');
-      return data ? JSON.parse(data) : [];
-    } catch(e) { return []; }
-  },
-  saveNotifyRequest(productId, email) {
-    try {
-      const list = storageService.getNotifyRequests();
-      list.unshift({ productId, email, date: new Date().toISOString() });
-      localStorage.setItem('dinas_notify_requests', JSON.stringify(list));
-    } catch(e){}
-  }
 };
 
 /* ========================= API SERVICE LAYER (BaaS Ready) ========================= */
@@ -240,6 +227,40 @@ const apiService = {
   },
   // Payment is tracked apart from status: a transfer lands before the parcel
   // moves, cash on delivery lands at the door. Null means unpaid.
+  // Anyone may join a waiting list, signed in or not — being made to create an
+  // account first is how a waiting list stays empty.
+  async createRestockRequest({ productId, email, phone }) {
+    const { error } = await supabaseClient.from('restock_requests').insert({
+      product_id: productId,
+      email: email || null,
+      phone: phone || null,
+      user_id: state.user ? state.user.id : null
+    });
+    if(!error) return 'ok';
+    // 23505 is the partial unique index: they are already on this list.
+    if(error.code === '23505') return 'duplicate';
+    console.error(error);
+    return 'error';
+  },
+  // Admin-only under RLS; a customer reading this back would be reading other
+  // customers' contact details.
+  async getRestockRequests() {
+    const { data, error } = await supabaseClient
+      .from('restock_requests')
+      .select('*')
+      .is('notified_at', null)
+      .order('created_at', { ascending: true });
+    if(error) { console.error(error); return []; }
+    return data;
+  },
+  async markRestockContacted(id) {
+    const { error } = await supabaseClient
+      .from('restock_requests')
+      .update({ notified_at: new Date().toISOString() })
+      .eq('id', id);
+    if(error) { console.error(error); return false; }
+    return true;
+  },
   async setOrderPaid(orderId, paid) {
     const { error } = await supabaseClient
       .from('orders')
@@ -636,15 +657,82 @@ function addCurrentToBag(){
   closeAllSheets();
 }
 
-function notifyMeForCurrentProduct(){
-  const p = currentProduct;
-  if(!p) return;
-  const defaultEmail = state.user ? state.user.email : "";
-  const email = prompt(`Enter your email and we'll let you know when "${p.name}" is back in stock:`, defaultEmail);
-  if(!email) return;
-  storageService.saveNotifyRequest(p.id, email.trim());
-  showToast("We'll email you when it's back ♥");
+let notifyProduct = null;
+
+function notifyMeForCurrentProduct(){ openNotifyMe(currentProduct && currentProduct.id); }
+
+function openNotifyMe(productId){
+  notifyProduct = PRODUCTS.find(p => p.id === productId) || null;
+  if(!notifyProduct) return;
+  renderNotifyMe();
+  openSheet('notifySheet');
+}
+
+function renderNotifyMe(){
+  const el = document.getElementById('notifyContent');
+  if(!el) return;
+  const p = notifyProduct;
+  const country = countryOf(state.country);
+  el.innerHTML = `
+    <p style="font-size:13.5px; color:var(--ink-soft); margin:0 0 16px; line-height:1.6;">
+      We'll tell you the moment <strong style="color:var(--ink);">${p.name}</strong> is back.
+      Every piece is one of a kind, so this isn't a reservation.
+    </p>
+
+    <div class="form-group">
+      <label class="form-label" for="nmEmail">Email</label>
+      <input class="form-input" id="nmEmail" type="email" placeholder="you@email.com"
+             value="${state.user ? state.user.email : ''}" autocomplete="email">
+      <div class="field-error" id="nmEmailErr"></div>
+    </div>
+
+    <div class="form-group">
+      <label class="form-label" for="nmPhone">Phone / WhatsApp</label>
+      <input class="form-input" id="nmPhone" type="tel" placeholder="${country.phoneExample}"
+             value="${state.user && state.user.phone ? state.user.phone : ''}" autocomplete="tel">
+      <div class="field-error" id="nmPhoneErr"></div>
+    </div>
+
+    <p style="font-size:12px; color:var(--ink-faint); margin:-4px 0 16px;">
+      Either one is enough. A number lets us message you on WhatsApp, which is usually faster.
+    </p>
+
+    <button class="primary-btn" id="nmSubmit" style="width:100%; padding:14px;" onclick="submitNotifyRequest()" disabled>
+      Notify Me
+    </button>
+  `;
+  touchedFields = new Set();
+  wireForm('notify');
+}
+
+async function submitNotifyRequest(){
+  if(!notifyProduct) return;
+  if(!formIsValid('notify')){
+    NOTIFY_FIELDS.forEach(f => touchedFields.add(f.id));
+    NOTIFY_FIELDS.forEach(f => validateField('notify', f.id));
+    showToast("Add an email or a phone number");
+    return;
+  }
+  const btn = document.getElementById('nmSubmit');
+  if(btn) btn.disabled = true;
+
+  const email = document.getElementById('nmEmail').value.trim();
+  const phoneRaw = document.getElementById('nmPhone').value.trim();
+  const result = await apiService.createRestockRequest({
+    productId: notifyProduct.id,
+    email,
+    phone: phoneRaw ? phoneE164(phoneRaw, state.country) : ''
+  });
+
+  if(result === 'error'){
+    if(btn) btn.disabled = false;
+    showToast("Couldn't save that — please try again");
+    return;
+  }
   closeAllSheets();
+  showToast(result === 'duplicate'
+    ? "You're already on the list for this piece ♥"
+    : "We'll let you know when it's back ♥");
 }
 
 /* ========================= BAG ========================= */
@@ -953,18 +1041,24 @@ async function dropSoldOutFromBag(e){
   const names = m[1].split('|');
 
   try { PRODUCTS = await apiService.fetchProducts(); } catch(_){}
-  state.bag = state.bag.filter(i => {
+  const gone = state.bag.filter(i => {
     const p = PRODUCTS.find(x => x.id === i.productId);
-    return p && p.stock !== 'out';
-  });
+    return !p || p.stock === 'out';
+  }).map(i => i.productId);
+
+  state.bag = state.bag.filter(i => !gone.includes(i.productId));
   storageService.saveCart(state.bag);
   updateBagBadge();
   lastGridSignature = null;
   renderGrid();
 
   closeAllSheets();
-  if(state.bag.length > 0) openBag();
   showToast(`Sorry — ${names.join(' and ')} ${names.length > 1 ? 'were' : 'was'} just bought by someone else`);
+
+  // Missing a one-of-a-kind piece by minutes is exactly when the waiting list
+  // is worth offering, so it opens rather than being left to be found again.
+  if(gone.length) openNotifyMe(gone[0]);
+  else if(state.bag.length > 0) openBag();
   return true;
 }
 
@@ -1157,6 +1251,21 @@ const CHECKOUT_FIELDS = [
   { id:'coNotes',   validate: () => null, max:200 }
 ];
 
+// Either one will do, so neither can demand a value by itself — what must hold
+// is checked across the pair in formIsValid.
+const NOTIFY_FIELDS = [
+  { id:'nmEmail', validate: v => !v.trim() ? null
+                              : EMAIL_RE.test(v.trim()) ? null : 'Enter a valid email, like you@email.com' },
+  { id:'nmPhone', validate: v => !v.trim() ? null
+                              : isValidPhone(v, state.country) ? null
+                              : `Enter a valid number, like ${countryOf(state.country).phoneExample}` }
+];
+function notifyHasContact(){
+  const email = document.getElementById('nmEmail');
+  const phone = document.getElementById('nmPhone');
+  return !!((email && email.value.trim()) || (phone && phone.value.trim()));
+}
+
 const emailField = {
   id:'authEmail',
   validate: v => !v.trim() ? 'Please enter your email address'
@@ -1178,7 +1287,11 @@ function authFields(){
 // Signup and recovery both show the live rules checklist.
 function authShowsPwRules(){ return authTab === 'signup' || authTab === 'recovery'; }
 
-function fieldsFor(form){ return form === 'auth' ? authFields() : CHECKOUT_FIELDS; }
+function fieldsFor(form){
+  if(form === 'auth') return authFields();
+  if(form === 'notify') return NOTIFY_FIELDS;
+  return CHECKOUT_FIELDS;
+}
 
 // A field stays quiet until it has been left once, so nobody is told their
 // half-typed email is wrong while they are still typing it.
@@ -1198,14 +1311,18 @@ function validateField(form, id){
 }
 
 function formIsValid(form){
-  return fieldsFor(form).every(f => {
+  const fieldsOk = fieldsFor(form).every(f => {
     const input = document.getElementById(f.id);
     return !input || !f.validate(input.value);
   });
+  // Notify Me is the one form with a rule spanning two fields rather than
+  // sitting on either.
+  return fieldsOk && (form !== 'notify' || notifyHasContact());
 }
 
+const SUBMIT_IDS = { auth:'authSubmit', checkout:'coSubmit', notify:'nmSubmit' };
 function refreshSubmit(form){
-  const btn = document.getElementById(form === 'auth' ? 'authSubmit' : 'coSubmit');
+  const btn = document.getElementById(SUBMIT_IDS[form]);
   if(btn) btn.disabled = !formIsValid(form);
 }
 
@@ -1247,15 +1364,16 @@ function wireForm(form){
       if(form === 'auth' && field.id === 'authPass' && authShowsPwRules()) renderPwRules();
       refreshSubmit(form);
     });
-    if(form === 'auth'){
+    const onEnter = { auth: handleAuthSubmit, notify: submitNotifyRequest }[form];
+    if(onEnter){
       input.addEventListener('keydown', e => {
         if(e.key !== 'Enter') return;
         e.preventDefault();
-        if(formIsValid('auth')) handleAuthSubmit();
+        if(formIsValid(form)) onEnter();
         else {
           // Surface whatever is still missing rather than doing nothing.
-          fieldsFor('auth').forEach(f => touchedFields.add(f.id));
-          fieldsFor('auth').forEach(f => validateField('auth', f.id));
+          fieldsFor(form).forEach(f => touchedFields.add(f.id));
+          fieldsFor(form).forEach(f => validateField(form, f.id));
         }
       });
     }
@@ -1575,6 +1693,21 @@ async function commitPhotos(folder){
   return urls;
 }
 
+let waitingProduct = null;
+
+function openWaitingList(productId){
+  waitingProduct = PRODUCTS.find(p => p.id === productId) || null;
+  setAdminTab('waiting');
+}
+
+// Takes someone off the list by hand — for the phone-only requests the restock
+// email can't reach.
+async function markContacted(id){
+  const ok = await apiService.markRestockContacted(id);
+  showToast(ok ? "Marked as contacted ✓" : "Couldn't update that — please try again");
+  await renderAdmin();
+}
+
 function openPhotoEditor(productId){
   photoEditProduct = PRODUCTS.find(p => p.id === productId) || null;
   photoDraft = (photoEditProduct && photoEditProduct.images || []).map(url => ({ url }));
@@ -1604,6 +1737,8 @@ async function setAdminTab(tab) {
 async function renderAdmin() {
   const el = document.getElementById('adminContent');
   const orders = await apiService.getOrders();
+  const waiting = (adminTab === 'inventory' || adminTab === 'waiting')
+    ? await apiService.getRestockRequests() : [];
   
   // Revenue is what has been paid for, not what has been ordered. An unpaid
   // transfer that never arrives must never show up as money taken.
@@ -1727,6 +1862,10 @@ async function renderAdmin() {
               <button class="stock-toggle-btn ${p.stock==='low'?'active-low':''}" onclick="setProductStock(${p.id}, 'low')">Low</button>
               <button class="stock-toggle-btn ${p.stock==='out'?'active-out':''}" onclick="setProductStock(${p.id}, 'out')">Sold Out</button>
               <button class="stock-toggle-btn" onclick="openPhotoEditor(${p.id})">Photos (${(p.images||[]).length})</button>
+              ${waiting.filter(r => r.product_id === p.id).length ? `
+                <button class="stock-toggle-btn waiting-btn" onclick="openWaitingList(${p.id})">
+                  Waiting (${waiting.filter(r => r.product_id === p.id).length})
+                </button>` : ''}
             </div>
           </div>
         `).join('')}
@@ -1796,6 +1935,37 @@ async function renderAdmin() {
         </button>
       </div>
     `;
+  } else if(adminTab === 'waiting') {
+    const p = waitingProduct;
+    const list = waiting.filter(r => r.product_id === (p && p.id));
+    bodyContent = p ? `
+      <div style="background:var(--surface); border:1px solid var(--line); border-radius:var(--radius-md); padding:16px;">
+        <h3 style="font-size:16px; margin:0 0 4px; color:var(--ink);">Waiting list</h3>
+        <p style="font-size:13px; color:var(--ink-soft); margin:0 0 4px;">${p.name}</p>
+        <p style="font-size:12px; color:var(--ink-faint); margin:0 0 14px; line-height:1.6;">
+          Everyone here is told automatically by email the moment you set this piece back to In Stock.
+          Anyone who left only a number has to be messaged by hand — that's what the WhatsApp link is for.
+        </p>
+
+        ${list.length === 0 ? `<p style="font-size:13px; color:var(--ink-soft);">Nobody is waiting for this piece.</p>` : `
+          <div class="waiting-list">
+            ${list.map(r => `
+              <div class="waiting-row">
+                <div style="min-width:0;">
+                  ${r.email ? `<div class="waiting-contact">${r.email}</div>` : ''}
+                  ${r.phone ? `<div class="waiting-contact">
+                      <a href="https://wa.me/${r.phone.replace(/[^0-9]/g, '')}" target="_blank" rel="noopener">${r.phone}</a>
+                      ${!r.email ? `<span class="waiting-tag">message by hand</span>` : ''}
+                    </div>` : ''}
+                  <div style="font-size:11px; color:var(--ink-faint);">asked ${paidOn(r.created_at)}</div>
+                </div>
+                <button class="stock-toggle-btn" onclick="markContacted(${r.id})">Mark contacted</button>
+              </div>`).join('')}
+          </div>`}
+
+        <button class="filter-btn" style="width:100%; margin-top:14px;" onclick="setAdminTab('inventory')">Back to Inventory</button>
+      </div>
+    ` : `<p style="font-size:13px; color:var(--ink-soft);">No piece selected.</p>`;
   } else if(adminTab === 'photos') {
     const p = photoEditProduct;
     bodyContent = p ? `
