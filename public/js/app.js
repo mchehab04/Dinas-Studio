@@ -1368,12 +1368,17 @@ function wireForm(form){
       validateField(form, field.id);
       refreshSubmit(form);
     });
-    input.addEventListener('input', () => {
+    const onValueChange = () => {
       if(touchedFields.has(field.id)) validateField(form, field.id);
       updateCharCount(field);
       if(form === 'auth' && field.id === 'authPass' && authShowsPwRules()) renderPwRules();
       refreshSubmit(form);
-    });
+    };
+    input.addEventListener('input', onValueChange);
+    // Chrome fills a remembered address or number without always firing
+    // `input`, which leaves the submit button disabled under a form that looks
+    // complete. `change` catches most of it; the sweep below catches the rest.
+    input.addEventListener('change', onValueChange);
     const onEnter = { auth: handleAuthSubmit, notify: submitNotifyRequest }[form];
     if(onEnter){
       input.addEventListener('keydown', e => {
@@ -1389,6 +1394,8 @@ function wireForm(form){
     }
   });
   refreshSubmit(form);
+  // Autofill can land after this render, so look again shortly afterwards.
+  setTimeout(() => refreshSubmit(form), 400);
 }
 
 /* ========================= ACCOUNT & AUTH ========================= */
@@ -2134,10 +2141,9 @@ function openSheet(id){
 }
 function closeAllSheets(){
   document.getElementById('overlay').classList.remove('open');
-  ['pdSheet','bagSheet','accountSheet','wishSheet','checkoutSheet','orderSuccessSheet','adminSheet'].forEach(id=>{
-    const s = document.getElementById(id);
-    if(s) s.classList.remove('open');
-  });
+  // Every .sheet in the page, rather than a hand-kept list of ids: a sheet
+  // added later used to fall off that list and become impossible to close.
+  document.querySelectorAll('.sheet').forEach(s => s.classList.remove('open'));
 }
 
 /* ========================= NAV / MISC ========================= */

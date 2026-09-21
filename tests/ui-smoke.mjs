@@ -255,6 +255,44 @@ check('a hostile order injects no markup', xss.ordersInjected === 0);
 check('the order is shown as plain text', xss.ordersShowText);
 check('nothing executed in the owner session', xss.pwned === 0);
 
+// Closing sheets, and a form the browser filled in for you.
+const closing = await page.evaluate(async () => {
+  const out = {};
+  // Every sheet must close, including ones added after closeAllSheets was
+  // written — the Notify Me sheet was unclosable because it wasn't on a list.
+  const ids = [...document.querySelectorAll('.sheet')].map(s => s.id);
+  out.leftOpen = [];
+  for (const id of ids) {
+    openSheet(id);
+    closeAllSheets();
+    if (document.getElementById(id).classList.contains('open')) out.leftOpen.push(id);
+  }
+  out.overlayClosed = !document.getElementById('overlay').classList.contains('open');
+
+  // Signed in, so the email arrives pre-filled: the button must start usable.
+  state.user = { id:'u1', email:'owner@example.com', name:'O', phone:null };
+  openNotifyMe(PRODUCTS[0].id);
+  out.enabledWhenPrefilled = !document.getElementById('nmSubmit').disabled;
+
+  // Autofill: value set with no `input` event, the way Chrome can do it.
+  state.user = null;
+  openNotifyMe(PRODUCTS[0].id);
+  const email = document.getElementById('nmEmail');
+  out.disabledBeforeAutofill = document.getElementById('nmSubmit').disabled;
+  email.value = 'autofilled@example.com';
+  await new Promise(r => setTimeout(r, 700));
+  out.enabledAfterAutofillSweep = !document.getElementById('nmSubmit').disabled;
+  closeAllSheets();
+  state.user = null;
+  return out;
+});
+check(`every sheet closes (${closing.leftOpen.length ? 'stuck: ' + closing.leftOpen.join(', ') : 'none stuck'})`,
+  closing.leftOpen.length === 0);
+check('the overlay closes with them', closing.overlayClosed);
+check('a pre-filled form is usable straight away', closing.enabledWhenPrefilled);
+check('an empty form still starts disabled', closing.disabledBeforeAutofill);
+check('a browser-autofilled form becomes usable', closing.enabledAfterAutofillSweep);
+
 check('no console errors', errors.length === 0);
 console.log(out.join('\n'));
 if (errors.length) console.log('\nconsole errors:\n' + errors.join('\n'));
