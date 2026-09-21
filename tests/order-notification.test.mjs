@@ -93,6 +93,12 @@ check('customer: transfer next-step', cust.html.includes('WhatsApp') && cust.htm
 check('customer: shows delivery window', cust.html.includes('3–5 business days'));
 check('customer: lists items', cust.html.includes('Silk Jacquard') && cust.html.includes('Summer Kimono'));
 check('customer: omits internal notes', !cust.html.includes('Ring twice'));
+check('customer: signed off by the shop', cust.html.includes("Dina's Studio") && cust.html.includes('+971 58 599 5315'));
+check('customer: signature links WhatsApp', cust.html.includes('https://wa.me/971585995315'));
+check('customer: signature links the site', cust.html.includes('dinasstudio.com'));
+
+// The owner messages every transfer customer, so their number is one tap away.
+check('owner: customer phone is a wa.me link', owner.html.includes('https://wa.me/9613123456'));
 
 // The greeting uses only the first word of the name, so escaping has to be
 // proven with markup inside that first word.
