@@ -31,30 +31,22 @@ Full migration record: [`CLOUDFLARE-MIGRATION.md`](CLOUDFLARE-MIGRATION.md).
 - [x] **`public/404.html` added.** Unknown paths now return a real 404 instead of the homepage with a 200.
 - [x] **Favicon.** `/favicon.ico` was answered by the SPA fallback — HTML with a 200 — so Google showed a placeholder globe instead of the logo. Real `public/favicon.ico` (48/96/144px) and `public/icon-192.png` now sit at the probed paths, with root-relative link tags. Google refreshes favicons on its own schedule, days to weeks after the deploy.
 
-## Stock and pricing — built, waiting to be rolled out
+## Stock, pricing and payment — live
 
-Part 1 and Part 2 of [the spec](superpowers/specs/2026-09-17-stock-and-restock-design.md) are written and tested locally. **Nothing is live until the steps below are done, in this order.**
+Parts 1 and 2 of [the spec](superpowers/specs/2026-09-17-stock-and-restock-design.md) are built, deployed and rolled out; all the SQL has been run.
 
-What changed: `public.place_order` claims each piece and prices the order inside one transaction, so two customers cannot buy the same one-of-a-kind piece and the browser can no longer decide what it pays. Quantity is gone from the product page and the bag — a piece is in the bag or it isn't. A bag that goes stale names the piece that went and drops it.
+- **`public.place_order`** claims each piece and prices the order in one transaction, so two customers cannot buy the same one-of-a-kind piece, and the browser no longer decides what it pays. `supabase/lock-direct-order-inserts.sql` has been run, so it is the only way an order can be created — there is no direct insert path left.
+- **Quantity is gone.** A piece is in the bag or it isn't; adding it twice says so. A bag that goes stale names the piece that went, drops it and reopens.
+- **A sale marks the piece Sold Out immediately**, without a reload — the grid skips rebuilds while the visible ids are unchanged, so `markPiecesSold` clears the signature as well as the cached stock.
+- **Revenue counts orders marked paid**, via `orders.paidAt` and a Mark paid control on each order. Payment is tracked apart from status because neither method lines up with a fulfilment step. Orders placed before this read as unpaid until marked.
 
-### Rollout — the order matters
+To re-check any of it: `supabase/verify-place-order.sql` tests against real data inside a transaction it rolls back.
 
-1. **Now, safe on the live site:** run `supabase/place-order.sql`. It only adds a function; the deployed checkout keeps inserting directly and is unaffected.
-2. **Optional, also safe:** run `supabase/verify-place-order.sql`. It tests against real data inside a transaction it rolls back, and prints PASS/FAIL notices.
-3. **Deploy** the client changes (push — one build).
-4. **Only after that deploy is live**, run `supabase/lock-direct-order-inserts.sql`. It revokes direct inserts into `orders`. Run before step 3 and live checkout breaks for every customer until the next deploy.
+## Next up — Part 3, restock notifications
 
-To confirm step 3 landed before doing step 4: place a real test order. If the piece flips to Sold Out on its own, `place_order` is in use.
+"Notify Me" still only writes to `localStorage`, so nothing is ever sent. It was left for second because nothing could sell out; now pieces do, so it is reachable and a sold-out piece is currently a dead end.
 
-### Also waiting on SQL: the paid flag
-
-Run `supabase/order-paid-flag.sql` (safe any time — it only adds a nullable column). Revenue in the admin panel now counts **orders marked paid**, not orders placed, because neither payment method lines up with a fulfilment status: a bank transfer lands before the parcel moves, cash on delivery lands at the door. Each order gets a Mark paid control, and the KPIs read Revenue (Paid) and Awaiting Payment.
-
-Existing orders come back null, i.e. unpaid, so mark the ones already paid for once after running it.
-
-### Still to build — Part 3, restock notifications
-
-"Notify Me" still only writes to `localStorage`, so nothing is ever sent. Unreachable until the first piece actually sells out, which is why it was left for second. Needs: the `restock_requests` table, a form in place of the `prompt()`, a `functions/api/restock-notification.js` on a `products` UPDATE webhook, `SUPABASE_SERVICE_ROLE_KEY` as a Pages secret, and the admin waiting list. Full detail in the spec.
+Needs: the `restock_requests` table, a form in place of the `prompt()`, a `functions/api/restock-notification.js` on a `products` UPDATE webhook, `SUPABASE_SERVICE_ROLE_KEY` as a Pages secret, and the admin waiting list. Full detail in the spec.
 
 ## Remaining concerns after that
 
@@ -63,6 +55,8 @@ Existing orders come back null, i.e. unpaid, so mark the ones already paid for o
 | **Per-product URLs** | The site is one page, so 17 products produce one indexable URL and nothing can rank individually. The largest remaining job, and the main SEO ceiling. |
 | **Admin shopping** | Decided to leave as is. Admins can place orders; no security issue, but test orders land among real revenue. |
 | **Orphaned photo uploads** | Accepted. If publishing fails after photos upload, the files remain in storage. |
+| **Payment links** | Deferred, not now. For the UAE, Ziina or Mamo send a link over WhatsApp with no site integration; Lebanon realistically stays on Whish. |
+| **Replies from orders@** | Cloudflare Email Routing forwards `orders@dinasstudio.com` to a personal inbox — set up, delivery not yet confirmed. Replies to a customer still go out from the personal address unless Gmail's "Send mail as" is pointed at Resend's SMTP. The customer confirmation already sets `Reply-To` to `NOTIFY_TO`, so replies land whether or not this works. |
 
 ## Things worth knowing before changing anything
 
