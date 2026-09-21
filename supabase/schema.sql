@@ -7,6 +7,7 @@
 --   profiles-email-integrity.sql
 --   place-order.sql             REQUIRED — checkout calls place_order, and
 --                               nothing below grants a direct insert into orders
+-- (order-paid-flag.sql is already folded into the orders table below.)
 -- ============================================================
 
 -- ---------- profiles ----------
@@ -130,7 +131,10 @@ create table public.orders (
   items jsonb not null,
   subtotal numeric not null,
   shipping numeric not null,
-  total numeric not null
+  total numeric not null,
+  -- Null means unpaid. Kept apart from status, which tracks the parcel, not
+  -- the money — see order-paid-flag.sql.
+  "paidAt" timestamptz
 );
 
 alter table public.orders enable row level security;

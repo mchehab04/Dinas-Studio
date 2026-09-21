@@ -46,6 +46,12 @@ What changed: `public.place_order` claims each piece and prices the order inside
 
 To confirm step 3 landed before doing step 4: place a real test order. If the piece flips to Sold Out on its own, `place_order` is in use.
 
+### Also waiting on SQL: the paid flag
+
+Run `supabase/order-paid-flag.sql` (safe any time — it only adds a nullable column). Revenue in the admin panel now counts **orders marked paid**, not orders placed, because neither payment method lines up with a fulfilment status: a bank transfer lands before the parcel moves, cash on delivery lands at the door. Each order gets a Mark paid control, and the KPIs read Revenue (Paid) and Awaiting Payment.
+
+Existing orders come back null, i.e. unpaid, so mark the ones already paid for once after running it.
+
 ### Still to build — Part 3, restock notifications
 
 "Notify Me" still only writes to `localStorage`, so nothing is ever sent. Unreachable until the first piece actually sells out, which is why it was left for second. Needs: the `restock_requests` table, a form in place of the `prompt()`, a `functions/api/restock-notification.js` on a `products` UPDATE webhook, `SUPABASE_SERVICE_ROLE_KEY` as a Pages secret, and the admin waiting list. Full detail in the spec.
@@ -64,7 +70,7 @@ To confirm step 3 landed before doing step 4: place a real test order. If the pi
 - **Functions read `env`, not `process.env`.** Workers have no `process.env`; `lib/order-notification.js` takes `env` as an argument.
 - **Test locally on Cloudflare's runtime before pushing:** `npx wrangler pages dev public --binding RESEND_API_KEY=test NOTIFY_TO=a@x.com WEBHOOK_SECRET=test`. A pass under plain Node once hid a real bundling failure.
 - **Run the function test with** `node tests/order-notification.test.mjs` (37 checks, no framework).
-- **`tests/bag-smoke.mjs`** drives the real storefront in a browser for the bag and stale-bag behaviour (17 checks). It needs a local static server and Playwright; the header says how. Playwright is deliberately not a project dependency.
+- **`tests/ui-smoke.mjs`** drives the real storefront in a browser for the bag, the stale-bag path and the admin's paid accounting (22 checks). It needs a local static server and Playwright; the header says how. Playwright is deliberately not a project dependency.
 - **Resend's DNS records now live in Cloudflare DNS:** TXT and MX on `send`, TXT on `resend._domainkey`, TXT on `_dmarc`. Cloudflare's import skipped the `send` records at first. If DNS ever moves again, recreate them before switching nameservers, or every email stops with nothing visibly wrong.
 - **Keep email-related DNS records grey (DNS only).**
 - **The Search Console TXT record on `@` must stay permanently** — deleting it un-verifies the property.

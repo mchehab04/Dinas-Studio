@@ -237,6 +237,16 @@ const apiService = {
   async updateOrderStatus(orderId, status) {
     const { error } = await supabaseClient.from('orders').update({ status }).eq('id', orderId);
     if(error) console.error(error);
+  },
+  // Payment is tracked apart from status: a transfer lands before the parcel
+  // moves, cash on delivery lands at the door. Null means unpaid.
+  async setOrderPaid(orderId, paid) {
+    const { error } = await supabaseClient
+      .from('orders')
+      .update({ paidAt: paid ? new Date().toISOString() : null })
+      .eq('id', orderId);
+    if(error) { console.error(error); return false; }
+    return true;
   }
 };
 
@@ -1595,9 +1605,13 @@ async function renderAdmin() {
   const el = document.getElementById('adminContent');
   const orders = await apiService.getOrders();
   
-  const totalRevenue = orders.reduce((sum, o) => sum + (o.total || 0), 0);
+  // Revenue is what has been paid for, not what has been ordered. An unpaid
+  // transfer that never arrives must never show up as money taken.
+  const paid = orders.filter(o => o.paidAt);
+  const unpaid = orders.filter(o => !o.paidAt);
+  const paidRevenue = paid.reduce((sum, o) => sum + (o.total || 0), 0);
+  const awaitingPayment = unpaid.reduce((sum, o) => sum + (o.total || 0), 0);
   const totalOrders = orders.length;
-  const pendingOrders = orders.filter(o => o.status === 'pending').length;
   
   const customerEmails = new Set(orders.map(o => o.customer ? o.customer.email.toLowerCase() : ''));
   customerEmails.delete('');
@@ -1610,8 +1624,9 @@ async function renderAdmin() {
       <!-- KPI Metric Cards -->
       <div class="kpi-grid">
         <div class="kpi-card">
-          <div class="kpi-title">Total Revenue</div>
-          <div class="kpi-value">${formatPrice(totalRevenue)}</div>
+          <div class="kpi-title">Revenue (Paid)</div>
+          <div class="kpi-value">${formatPrice(paidRevenue)}</div>
+          <div class="kpi-sub">${paid.length} order${paid.length===1?'':'s'}</div>
         </div>
         <div class="kpi-card">
           <div class="kpi-title">Total Orders</div>
@@ -1622,8 +1637,9 @@ async function renderAdmin() {
           <div class="kpi-value">${customerCount}</div>
         </div>
         <div class="kpi-card">
-          <div class="kpi-title">Pending Orders</div>
-          <div class="kpi-value" style="color:#B4791C;">${pendingOrders}</div>
+          <div class="kpi-title">Awaiting Payment</div>
+          <div class="kpi-value" style="color:#B4791C;">${formatPrice(awaitingPayment)}</div>
+          <div class="kpi-sub">${unpaid.length} order${unpaid.length===1?'':'s'}</div>
         </div>
       </div>
 
@@ -1669,9 +1685,15 @@ async function renderAdmin() {
                 ${o.items ? o.items.map(i => `<div>${i.qty}x ${i.name} <span style="font-weight:700;">(${i.size})</span></div>`).join('') : 'Items'}
               </div>
 
-              <div style="display:flex; justify-content:space-between; align-items:center; font-size:13px;">
+              <div style="display:flex; justify-content:space-between; align-items:center; gap:8px; flex-wrap:wrap; font-size:13px;">
                 <span style="color:var(--ink-faint); text-transform:uppercase; font-size:11px;">Payment: ${o.paymentMethod || 'COD'}</span>
-                <strong style="color:var(--primary); font-size:14px;">${formatPrice(o.total)}</strong>
+                <div style="display:flex; align-items:center; gap:10px;">
+                  <button class="paid-toggle ${o.paidAt ? 'is-paid' : ''}"
+                          onclick="toggleOrderPaid('${o.id}', ${o.paidAt ? 'true' : 'false'})">
+                    ${o.paidAt ? `Paid · ${paidOn(o.paidAt)}` : 'Mark paid'}
+                  </button>
+                  <strong style="color:var(--primary); font-size:14px;">${formatPrice(o.total)}</strong>
+                </div>
               </div>
             </div>
           `).join('')}
@@ -1899,6 +1921,19 @@ async function saveNewProduct() {
   showToast(`"${name}" published to storefront ✓`);
   await setAdminTab('inventory');
   renderGrid();
+}
+
+const paidOn = ts => new Date(ts).toLocaleDateString('en-AE', { day:'numeric', month:'short' });
+
+// Marking paid is the one admin action that changes what the revenue figure
+// says, so an accidental tap is worth one question.
+async function toggleOrderPaid(orderId, isPaid) {
+  if(isPaid && !confirm(`Mark order ${orderId} as NOT paid again?`)) return;
+  const ok = await apiService.setOrderPaid(orderId, !isPaid);
+  showToast(ok
+    ? (isPaid ? `Order ${orderId} marked unpaid` : `Order ${orderId} marked paid ✓`)
+    : "Couldn't update the order — please try again");
+  await renderAdmin();
 }
 
 async function updateStatus(orderId, newStatus) {

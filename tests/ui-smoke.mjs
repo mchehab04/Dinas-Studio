@@ -1,12 +1,13 @@
-// Drives the real storefront in a browser to check the one-of-a-kind bag:
-// no quantities anywhere, a piece can only be in the bag once, and a piece
-// bought out from under a shopper leaves the bag with the reason named.
+// Drives the real storefront in a browser: the one-of-a-kind bag (no
+// quantities anywhere, a piece can only be in it once, and a piece bought out
+// from under a shopper leaves it with the reason named), and the admin panel's
+// paid/unpaid accounting.
 //
 // Run:
 //   1. python -m http.server 8790 --bind 127.0.0.1   (from public/)
 //   2. npx playwright install chromium-headless-shell  (first time only)
-//   3. npx --yes playwright@1.63 node tests/bag-smoke.mjs
-//      — or, with playwright already installed: node tests/bag-smoke.mjs
+//   3. npx --yes playwright@1.63 node tests/ui-smoke.mjs
+//      — or, with playwright already installed: node tests/ui-smoke.mjs
 //
 // Playwright is deliberately not a project dependency; this is an occasional
 // check, not part of a build. The page reads live products from Supabase and
@@ -102,6 +103,32 @@ if (sold.skip) {
   check('its sizes are marked sold', sold.soldOut > 0);
   check(`the grid says so without a reload (tag: "${sold.tag}")`, sold.tag === 'Sold Out');
 }
+
+// Admin accounting: revenue counts what has been paid for, not what has been
+// ordered. Driven with stand-in orders so nothing real is read or written.
+const admin = await page.evaluate(async () => {
+  const one = (id, total, paidAt) => ({
+    id, total, paidAt, status: 'pending', paymentMethod: 'transfer',
+    customer: { name: 'A', email: `${id}@x.com`, phone: '+971500000000' },
+    shippingAddress: { country: 'AE', region: 'Dubai', address: 'x' }, items: []
+  });
+  const real = apiService.getOrders;
+  apiService.getOrders = async () => [one('DS-0001', 100, null), one('DS-0002', 250, '2026-09-20T10:00:00Z')];
+  adminTab = 'orders';
+  await renderAdmin();
+  apiService.getOrders = real;
+  const el = document.getElementById('adminContent');
+  return {
+    text: el.innerText,
+    markedPaid: el.querySelectorAll('.paid-toggle.is-paid').length,
+    toggles: el.querySelectorAll('.paid-toggle').length
+  };
+});
+check('revenue counts only the paid order (AED 250)', /Revenue \(Paid\)[\s\S]{0,40}AED 250/i.test(admin.text));
+check('the unpaid order is shown as awaiting payment (AED 100)', /Awaiting Payment[\s\S]{0,40}AED 100/i.test(admin.text));
+check('every order gets a paid control', admin.toggles === 2);
+check('only the paid one reads as paid', admin.markedPaid === 1);
+check('the unpaid one offers Mark paid', /Mark paid/.test(admin.text));
 
 check('no console errors', errors.length === 0);
 console.log(out.join('\n'));
