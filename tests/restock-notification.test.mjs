@@ -21,6 +21,7 @@ let queue = [];
 let calls = [];
 let failSend = () => false;
 let failRead = false;
+let readStatus = 500;
 
 globalThis.fetch = async (url, init = {}) => {
   calls.push({ url, init, body: init.body ? JSON.parse(init.body) : null });
@@ -29,7 +30,7 @@ globalThis.fetch = async (url, init = {}) => {
     return failSend(to) ? new Response('nope', { status: 422 }) : new Response('{"id":"re_1"}', { status: 200 });
   }
   if (init.method === 'PATCH') return new Response('[]', { status: 200 });
-  if (failRead) return new Response('boom', { status: 500 });
+  if (failRead) return new Response('boom', { status: readStatus });
   return new Response(JSON.stringify(queue), { status: 200 });
 };
 
@@ -127,12 +128,27 @@ check('a failed send still returns 200', partial.status === 200);
 check('the rest are still emailed', sends().length === 2);
 check('only the delivered one is marked', patches()[0].url.includes('id=in.(32)'));
 
-// --- an unreadable waiting list is worth retrying
+// --- an unreadable waiting list is worth retrying, and says why
 reset([]);
 failRead = true;
 const readFailed = await run({ secret: 's3cret' });
 check('read failure -> 502', readFailed.status === 502);
 check('read failure sends nothing', sends().length === 0);
+check('read failure reports the upstream status', (await readFailed.text()).includes('500'));
+
+// The wrong kind of key is the likeliest cause, so the response names it —
+// Supabase's webhook log shows this text, which is where it gets looked at.
+reset([]);
+failRead = true; readStatus = 401;
+const denied = await run({ secret: 's3cret' });
+check('a denied read names the key to check', (await denied.text()).includes('SUPABASE_SERVICE_ROLE_KEY'));
+reset([]);
+failRead = true; readStatus = 404;
+const notFound = await run({ secret: 's3cret' });
+const notFoundText = await notFound.text();
+check('a missing table points at the URL and the SQL',
+  notFoundText.includes('SUPABASE_URL') && notFoundText.includes('restock-requests.sql'));
+readStatus = 500;
 
 // --- a malformed address is skipped rather than sent
 reset([{ id: 41, email: 'not-an-email' }]);
