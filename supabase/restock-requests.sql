@@ -55,3 +55,23 @@ create unique index if not exists restock_pending_phone
 -- policy above is what actually restricts that.
 grant insert on public.restock_requests to anon, authenticated;
 grant select, update, delete on public.restock_requests to authenticated;
+
+-- ---------- shape constraints ----------
+-- Anyone may insert here, signed in or not, and the anon key is public — so
+-- these rows arrive from outside the app as easily as from it. The admin panel
+-- escapes what it renders; this rejects the junk at the door as well, so a
+-- malformed value cannot be stored in the first place.
+--
+-- Guarded, so this file stays safe to re-run.
+do $$
+begin
+  if not exists (select 1 from pg_constraint where conname = 'restock_email_shape') then
+    alter table public.restock_requests add constraint restock_email_shape
+      check (email is null or (length(email) <= 254 and email ~ '^[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}$'));
+  end if;
+  if not exists (select 1 from pg_constraint where conname = 'restock_phone_shape') then
+    -- E.164, which is what the client normalises to before sending.
+    alter table public.restock_requests add constraint restock_phone_shape
+      check (phone is null or phone ~ '^\+[0-9]{8,15}$');
+  end if;
+end $$;

@@ -47,6 +47,16 @@ function regionOf(order){
   return a.region || a.emirate || '';
 }
 
+// Everything a customer typed goes through this before it reaches innerHTML.
+// The admin panel is the sharp case: a restock request can be inserted by
+// anyone at all, signed in or not, so an unescaped address or number would run
+// as script in the owner's session, with the owner's privileges.
+function escHtml(v){
+  return String(v ?? '')
+    .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;').replace(/'/g, '&#39;');
+}
+
 function formatPrice(amount) {
   return `AED ${amount} · $${(amount / AED_PER_USD).toFixed(2)}`;
 }
@@ -682,14 +692,14 @@ function renderNotifyMe(){
     <div class="form-group">
       <label class="form-label" for="nmEmail">Email</label>
       <input class="form-input" id="nmEmail" type="email" placeholder="you@email.com"
-             value="${state.user ? state.user.email : ''}" autocomplete="email">
+             value="${escHtml(state.user ? state.user.email : '')}" autocomplete="email">
       <div class="field-error" id="nmEmailErr"></div>
     </div>
 
     <div class="form-group">
       <label class="form-label" for="nmPhone">Phone / WhatsApp</label>
       <input class="form-input" id="nmPhone" type="tel" placeholder="${country.phoneExample}"
-             value="${state.user && state.user.phone ? state.user.phone : ''}" autocomplete="tel">
+             value="${escHtml(state.user && state.user.phone ? state.user.phone : '')}" autocomplete="tel">
       <div class="field-error" id="nmPhoneErr"></div>
     </div>
 
@@ -901,18 +911,18 @@ function renderCheckout() {
       <h4 style="margin-top:0;">Contact Details</h4>
       <div class="form-group">
         <label class="form-label" for="coName">Full Name *</label>
-        <input class="form-input" id="coName" placeholder="e.g. Dina Amari" value="${defaultName}" autocomplete="name">
+        <input class="form-input" id="coName" placeholder="e.g. Dina Amari" value="${escHtml(defaultName)}" autocomplete="name">
         <div class="field-error" id="coNameErr"></div>
       </div>
       <div class="form-row-2">
         <div class="form-group">
           <label class="form-label" for="coEmail">Email Address *</label>
-          <input class="form-input" id="coEmail" type="email" placeholder="you@email.com" value="${defaultEmail}" autocomplete="email">
+          <input class="form-input" id="coEmail" type="email" placeholder="you@email.com" value="${escHtml(defaultEmail)}" autocomplete="email">
           <div class="field-error" id="coEmailErr"></div>
         </div>
         <div class="form-group">
           <label class="form-label" for="coPhone">Phone / WhatsApp *</label>
-          <input class="form-input" id="coPhone" type="tel" placeholder="${country.phoneExample}" value="${defaultPhone}" autocomplete="tel">
+          <input class="form-input" id="coPhone" type="tel" placeholder="${country.phoneExample}" value="${escHtml(defaultPhone)}" autocomplete="tel">
           <div class="field-error" id="coPhoneErr"></div>
         </div>
       </div>
@@ -1087,25 +1097,25 @@ function renderOrderSuccess(order) {
 
       ${order.paymentMethod === 'transfer' ? `
       <div class="transfer-note">
-        <strong>Next step:</strong> we'll message you on WhatsApp at ${order.customer.phone} with the transfer details. Your order is reserved until payment arrives.
+        <strong>Next step:</strong> we'll message you on WhatsApp at ${escHtml(order.customer.phone)} with the transfer details. Your order is reserved until payment arrives.
       </div>` : ''}
 
       <div class="order-summary-box">
         <div class="order-detail-row">
           <span>Customer:</span>
-          <strong>${order.customer.name}</strong>
+          <strong>${escHtml(order.customer.name)}</strong>
         </div>
         <div class="order-detail-row">
           <span>Phone:</span>
-          <strong>${order.customer.phone}</strong>
+          <strong>${escHtml(order.customer.phone)}</strong>
         </div>
         <div class="order-detail-row">
           <span>Delivery to:</span>
-          <strong>${regionOf(order)}, ${countryOf(order.shippingAddress.country).name}</strong>
+          <strong>${escHtml(regionOf(order))}, ${countryOf(order.shippingAddress.country).name}</strong>
         </div>
         <div class="order-detail-row">
           <span>Address:</span>
-          <span>${order.shippingAddress.address}</span>
+          <span>${escHtml(order.shippingAddress.address)}</span>
         </div>
         <div class="order-detail-row">
           <span>Payment:</span>
@@ -1413,7 +1423,7 @@ async function renderAccount(){
         <div class="avatar-circle">${state.user.name.charAt(0).toUpperCase()}</div>
         <div>
           <div style="font-weight:800; font-size:16px;">${state.user.name}</div>
-          <div style="font-size:12px; color:var(--ink-faint);">${state.user.email}</div>
+          <div style="font-size:12px; color:var(--ink-faint);">${escHtml(state.user.email)}</div>
         </div>
       </div>
 
@@ -1432,7 +1442,7 @@ async function renderAccount(){
                 <span class="order-status-pill status-${o.status}">${o.status.toUpperCase()}</span>
               </div>
               <div style="font-size:12.5px; color:var(--ink-soft); margin-bottom:6px;">
-                ${o.items.map(i=>`${i.qty}x ${i.name} (${i.size})`).join(', ')}
+                ${o.items.map(i=>`${escHtml(i.qty)}x ${escHtml(i.name)} (${escHtml(i.size)})`).join(', ')}
               </div>
               <div style="display:flex; justify-content:space-between; font-size:13px; font-weight:700; color:var(--primary);">
                 <span>Total</span>
@@ -1808,16 +1818,16 @@ async function renderAdmin() {
               </div>
 
               <div style="font-size:12.5px; color:var(--ink); margin-bottom:4px;">
-                <strong>${o.customer ? o.customer.name : 'Guest'}</strong> 
-                <span style="color:var(--ink-soft);">· ${o.customer ? o.customer.phone : ''}</span>
+                <strong>${o.customer ? escHtml(o.customer.name) : 'Guest'}</strong> 
+                <span style="color:var(--ink-soft);">· ${o.customer ? escHtml(o.customer.phone) : ''}</span>
               </div>
 
               <div style="font-size:12px; color:var(--ink-soft); margin-bottom:8px;">
-                📍 ${o.shippingAddress ? `${regionOf(o)}, ${countryOf(o.shippingAddress.country).name} (${o.shippingAddress.address})` : '—'}
+                📍 ${o.shippingAddress ? `${escHtml(regionOf(o))}, ${countryOf(o.shippingAddress.country).name} (${escHtml(o.shippingAddress.address)})` : '—'}
               </div>
 
               <div style="background:var(--surface-alt); border-radius:6px; padding:8px 10px; font-size:12px; color:var(--ink-soft); margin-bottom:8px;">
-                ${o.items ? o.items.map(i => `<div>${i.qty}x ${i.name} <span style="font-weight:700;">(${i.size})</span></div>`).join('') : 'Items'}
+                ${o.items ? o.items.map(i => `<div>${escHtml(i.qty)}x ${escHtml(i.name)} <span style="font-weight:700;">(${escHtml(i.size)})</span></div>`).join('') : 'Items'}
               </div>
 
               <div style="display:flex; justify-content:space-between; align-items:center; gap:8px; flex-wrap:wrap; font-size:13px;">
@@ -1952,9 +1962,9 @@ async function renderAdmin() {
             ${list.map(r => `
               <div class="waiting-row">
                 <div style="min-width:0;">
-                  ${r.email ? `<div class="waiting-contact">${r.email}</div>` : ''}
+                  ${r.email ? `<div class="waiting-contact">${escHtml(r.email)}</div>` : ''}
                   ${r.phone ? `<div class="waiting-contact">
-                      <a href="https://wa.me/${r.phone.replace(/[^0-9]/g, '')}" target="_blank" rel="noopener">${r.phone}</a>
+                      <a href="https://wa.me/${String(r.phone).replace(/[^0-9]/g, '')}" target="_blank" rel="noopener">${escHtml(r.phone)}</a>
                       ${!r.email ? `<span class="waiting-tag">message by hand</span>` : ''}
                     </div>` : ''}
                   <div style="font-size:11px; color:var(--ink-faint);">asked ${paidOn(r.created_at)}</div>

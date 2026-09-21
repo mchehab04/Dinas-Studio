@@ -212,6 +212,49 @@ check('only the phone-only one is flagged to message by hand', adminWaiting.byHa
 check('each waiting person can be marked contacted', adminWaiting.markButtons === 2);
 check('inventory shows the count', /Waiting \(2\)/.test(adminWaiting.inventoryText));
 
+// Stored XSS: anyone can insert a restock request, signed in or not, and the
+// admin panel renders it in the owner's session. A hostile value must come out
+// as text, never as markup.
+const xss = await page.evaluate(async () => {
+  const p = PRODUCTS[0];
+  const PAYLOAD = '<img src=x onerror="window.__pwned=1">';
+  window.__pwned = 0;
+  const realOrders = apiService.getOrders;
+  const realReqs = apiService.getRestockRequests;
+  apiService.getOrders = async () => ([{
+    id: 'DS-9', total: 1, status: 'pending', paymentMethod: 'cod', paidAt: null,
+    customer: { name: PAYLOAD, email: 'x@x.com', phone: PAYLOAD },
+    shippingAddress: { country: 'AE', region: 'Dubai', address: PAYLOAD },
+    items: [{ name: PAYLOAD, size: PAYLOAD, qty: 1, total: 1 }]
+  }]);
+  apiService.getRestockRequests = async () => ([
+    { id: 1, product_id: p.id, email: PAYLOAD, phone: PAYLOAD, created_at: '2026-09-20T09:00:00Z', notified_at: null }
+  ]);
+
+  waitingProduct = p; adminTab = 'waiting'; await renderAdmin();
+  const waitingEl = document.getElementById('adminContent');
+  const res = {
+    waitingInjected: waitingEl.querySelectorAll('img').length,
+    waitingShowsText: waitingEl.innerText.includes(PAYLOAD)
+  };
+
+  adminTab = 'orders'; await renderAdmin();
+  const ordersEl = document.getElementById('adminContent');
+  res.ordersInjected = ordersEl.querySelectorAll('img').length;
+  res.ordersShowText = ordersEl.innerText.includes(PAYLOAD);
+
+  apiService.getOrders = realOrders;
+  apiService.getRestockRequests = realReqs;
+  await new Promise(r => setTimeout(r, 150));
+  res.pwned = window.__pwned;
+  return res;
+});
+check('a hostile restock request injects no markup', xss.waitingInjected === 0);
+check('it is shown to the owner as plain text', xss.waitingShowsText);
+check('a hostile order injects no markup', xss.ordersInjected === 0);
+check('the order is shown as plain text', xss.ordersShowText);
+check('nothing executed in the owner session', xss.pwned === 0);
+
 check('no console errors', errors.length === 0);
 console.log(out.join('\n'));
 if (errors.length) console.log('\nconsole errors:\n' + errors.join('\n'));

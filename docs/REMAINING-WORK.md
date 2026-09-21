@@ -74,11 +74,12 @@ To check it end to end: join the waiting list for a piece, set that piece to Sol
 
 ## Things worth knowing before changing anything
 
+- **Escape anything a customer typed before it reaches `innerHTML`** — use `escHtml()` in `public/js/app.js`. The admin panel is the sharp case: anyone at all can insert a restock request, so an unescaped email or phone number would run as script in the owner's session, with the owner's privileges. `tests/ui-smoke.mjs` has a regression check that was confirmed to fail without the escaping.
 - **Every file in `functions/` becomes a route.** Keep tests and shared code out of it — logic lives in `lib/`, and `functions/api/` holds only thin adapters. The Netlify equivalent of this mistake once broke a build.
 - **Functions read `env`, not `process.env`.** Workers have no `process.env`; `lib/order-notification.js` takes `env` as an argument.
 - **Test locally on Cloudflare's runtime before pushing:** `npx wrangler pages dev public --binding RESEND_API_KEY=test NOTIFY_TO=a@x.com WEBHOOK_SECRET=test`. A pass under plain Node once hid a real bundling failure.
 - **Run the function tests with** `node tests/order-notification.test.mjs` (41 checks) and `node tests/restock-notification.test.mjs` (33 checks). No framework, no dependencies.
-- **`tests/ui-smoke.mjs`** drives the real storefront in a browser for the bag, the stale-bag path and the admin's paid accounting, Notify Me and the waiting list (36 checks). It needs a local static server and Playwright; the header says how. Playwright is deliberately not a project dependency.
+- **`tests/ui-smoke.mjs`** drives the real storefront in a browser for the bag, the stale-bag path and the admin's paid accounting, Notify Me, the waiting list and an XSS regression check (41 checks). It needs a local static server and Playwright; the header says how. Playwright is deliberately not a project dependency.
 - **Resend's DNS records now live in Cloudflare DNS:** TXT and MX on `send`, TXT on `resend._domainkey`, TXT on `_dmarc`. Cloudflare's import skipped the `send` records at first. If DNS ever moves again, recreate them before switching nameservers, or every email stops with nothing visibly wrong.
 - **Keep email-related DNS records grey (DNS only).**
 - **The Search Console TXT record on `@` must stay permanently** — deleting it un-verifies the property.
