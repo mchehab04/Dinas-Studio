@@ -1176,11 +1176,17 @@ function photoRejection(file){
 
 // Uploads both variants and returns the -lg URL, which is what the product row
 // stores; the -sm one is found later by swapping the suffix.
-async function uploadPhoto(file, folder, index){
+//
+// The name is unique per upload, never the photo's position. Naming by position
+// meant re-editing a product overwrote the file already sitting at that slot:
+// the URL never changed, so browsers and the CDN kept serving the old picture,
+// and a kept image could end up listed twice under one URL.
+async function uploadPhoto(file, folder){
+  const stamp = `${Date.now().toString(36)}${Math.random().toString(36).slice(2, 8)}`;
   let lgUrl = null;
   for(const { suffix, edge, quality } of PHOTO_SIZES){
     const blob = await resizeToWebp(file, edge, quality);
-    const path = `${folder}/${index}-${suffix}.webp`;
+    const path = `${folder}/${stamp}-${suffix}.webp`;
     const { error } = await supabaseClient.storage.from(PHOTO_BUCKET)
       .upload(path, blob, { contentType: 'image/webp', upsert: true });
     if(error) throw new Error(`${file.name}: ${error.message}`);
@@ -1704,7 +1710,7 @@ async function commitPhotos(folder){
     const item = photoDraft[i];
     if(item.url){ urls.push(item.url); continue; }
     setPhotoBusy(true, `Uploading photo ${i + 1} of ${photoDraft.length}…`);
-    urls.push(await uploadPhoto(item.file, folder, i));
+    urls.push(await uploadPhoto(item.file, folder));
   }
   setPhotoBusy(false);
   return urls;

@@ -293,6 +293,56 @@ check('a pre-filled form is usable straight away', closing.enabledWhenPrefilled)
 check('an empty form still starts disabled', closing.disabledBeforeAutofill);
 check('a browser-autofilled form becomes usable', closing.enabledAfterAutofillSweep);
 
+// Editing a product's photos. Storage is stubbed, so nothing is uploaded — what
+// matters is the paths chosen and the order of the URLs handed back.
+const photos = await page.evaluate(async () => {
+  const uploaded = [];
+  const realStorage = supabaseClient.storage;
+  supabaseClient.storage = {
+    from: () => ({
+      upload: async (path) => { uploaded.push(path); return { error: null }; },
+      getPublicUrl: (path) => ({ data: { publicUrl: 'https://cdn.example/' + path } })
+    })
+  };
+
+  // A real 1x1 image, so the resize and WebP encode actually run.
+  const cv = document.createElement('canvas');
+  cv.width = cv.height = 8;
+  cv.getContext('2d').fillRect(0, 0, 8, 8);
+  const blob = await new Promise(r => cv.toBlob(r, 'image/png'));
+  const file = (n) => new File([blob], n, { type: 'image/png' });
+
+  // The reported case: delete the first of two, add two new ones, keep the old
+  // second — so the kept one ends up last.
+  const KEPT = 'https://cdn.example/7/1-lg.webp';
+  photoDraft = [
+    { file: file('new_1.png'), preview: '' },
+    { file: file('new_2.png'), preview: '' },
+    { url: KEPT }
+  ];
+  const urls = await commitPhotos('7');
+  photoDraft = [];
+  supabaseClient.storage = realStorage;
+
+  return {
+    urls,
+    uploaded,
+    keptLast: urls[2] === KEPT,
+    allDistinct: new Set(urls).size === urls.length,
+    noneReuseKept: urls.slice(0, 2).every(u => u !== KEPT),
+    bothVariants: uploaded.filter(p => p.endsWith('-sm.webp')).length === 2
+                  && uploaded.filter(p => p.endsWith('-lg.webp')).length === 2,
+    smallVariantStillWorks: smallVariant(urls[0]) === urls[0].replace('-lg.webp', '-sm.webp')
+  };
+});
+check(`re-editing photos yields ${photos.urls.length} distinct URLs`, photos.allDistinct);
+check('a new photo never overwrites a kept one', photos.noneReuseKept);
+check('the kept photo stays in its new position', photos.keptLast);
+check('both sizes are uploaded for each new photo', photos.bothVariants);
+check('the -sm/-lg pairing still resolves', photos.smallVariantStillWorks);
+check(`paths are no longer named by position (${photos.uploaded[0]})`,
+  !/\/(0|1|2|3)-(sm|lg)\.webp$/.test(photos.uploaded[0]));
+
 check('no console errors', errors.length === 0);
 console.log(out.join('\n'));
 if (errors.length) console.log('\nconsole errors:\n' + errors.join('\n'));
