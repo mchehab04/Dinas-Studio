@@ -56,6 +56,11 @@ create unique index if not exists restock_pending_phone
 grant insert on public.restock_requests to anon, authenticated;
 grant select, update, delete on public.restock_requests to authenticated;
 
+-- The restock webhook reads and updates this table as service_role. Bypassing
+-- RLS and holding table privileges are two different things: without this the
+-- function gets 42501 permission denied, however valid its key is.
+grant all on public.restock_requests to service_role;
+
 -- ---------- shape constraints ----------
 -- Anyone may insert here, signed in or not, and the anon key is public — so
 -- these rows arrive from outside the app as easily as from it. The admin panel

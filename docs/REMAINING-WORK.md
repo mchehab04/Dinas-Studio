@@ -74,6 +74,7 @@ To check it end to end: join the waiting list for a piece, set that piece to Sol
 
 ## Things worth knowing before changing anything
 
+- **A service-role key bypasses RLS but still needs table grants.** They are separate mechanisms, and a missing `grant ... to service_role` fails as `42501 permission denied` with a perfectly valid key. Any new table a Pages function reads needs that grant, and Postgres names it in the error hint — read that before doubting the key.
 - **Escape anything a customer typed before it reaches `innerHTML`** — use `escHtml()` in `public/js/app.js`. The admin panel is the sharp case: anyone at all can insert a restock request, so an unescaped email or phone number would run as script in the owner's session, with the owner's privileges. `tests/ui-smoke.mjs` has a regression check that was confirmed to fail without the escaping.
 - **Every file in `functions/` becomes a route.** Keep tests and shared code out of it — logic lives in `lib/`, and `functions/api/` holds only thin adapters. The Netlify equivalent of this mistake once broke a build.
 - **Functions read `env`, not `process.env`.** Workers have no `process.env`; `lib/order-notification.js` takes `env` as an argument.

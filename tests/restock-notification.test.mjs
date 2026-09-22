@@ -143,6 +143,12 @@ failRead = true; readStatus = 401;
 const denied = await run({ secret: 's3cret' });
 check('a denied read names the key to check', (await denied.text()).includes('SUPABASE_SERVICE_ROLE_KEY'));
 reset([]);
+failRead = true; readStatus = 403;
+const forbidden = await run({ secret: 's3cret' });
+check('a forbidden read points at the missing grant',
+  (await forbidden.text()).includes('grant all on public.restock_requests to service_role'));
+
+reset([]);
 failRead = true; readStatus = 404;
 const notFound = await run({ secret: 's3cret' });
 const notFoundText = await notFound.text();
