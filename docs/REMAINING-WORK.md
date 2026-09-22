@@ -42,25 +42,16 @@ Parts 1 and 2 of [the spec](superpowers/specs/2026-09-17-stock-and-restock-desig
 
 To re-check any of it: `supabase/verify-place-order.sql` tests against real data inside a transaction it rolls back.
 
-## Restock notifications — built, waiting to be rolled out
+## Restock notifications — live
 
-Part 3 of [the spec](superpowers/specs/2026-09-17-stock-and-restock-design.md). Built and tested locally; **nothing sends until every step below is done.**
+Part 3 of [the spec](superpowers/specs/2026-09-17-stock-and-restock-design.md), working end to end: a shopper joins a waiting list from a sold-out piece (or automatically when their bag goes stale at checkout), and setting that piece back to In Stock emails everyone on it.
 
-"Notify Me" is now a real form (email and/or phone, either one is enough, pre-filled when signed in) writing to `public.restock_requests`. It is offered from a sold-out piece and automatically when a bag goes stale at checkout. When a piece goes from Sold Out back to In Stock, a webhook emails everyone waiting and marks them notified. Requests left with only a phone number are listed in the admin inventory under **Waiting (n)**, each with a WhatsApp link and a Mark contacted button, because there is no messaging API.
+- **Table:** `public.restock_requests` — email and/or phone, either alone is enough. Anyone may insert; only admins may read it back. Partial unique indexes stop one person queueing twice for a piece.
+- **Function:** `lib/restock-notification.js` behind `functions/api/restock-notification.js`, on the Supabase webhook `on_product_restocked` (`public.products` UPDATE). It acts only on out → in stock; price edits, new photos and pieces going out of stock all arrive there too and send nothing.
+- **Config:** `SUPABASE_URL` and `SUPABASE_SERVICE_ROLE_KEY` are Pages variables, the second a secret. The table is granted to `service_role` — needed separately from RLS.
+- **Phone-only requests** can't be emailed, so they show in the admin inventory under **Waiting (n)** with a `wa.me` link and a Mark contacted button.
 
-### Rollout, in this order
-
-1. **Now, safe on the live site:** run `supabase/restock-requests.sql`. It only adds a table; nothing reads it until the new client ships.
-2. **Deploy** the client (push — one build). Before this, the form has no table to write to.
-3. **Cloudflare Pages → Settings → Variables and Secrets (Production)**, add:
-   - `SUPABASE_URL` — `https://ciwahcmsjcywakwhtsle.supabase.co`, plain text (it is public already).
-   - `SUPABASE_SERVICE_ROLE_KEY` — Supabase → Settings → API → service_role. **Secret.** This key bypasses RLS on every table; it belongs nowhere else, and never in the repo.
-   - Then **retry the latest production deployment** — variables only reach deployments created after they are added.
-4. **Supabase → Database → Webhooks → Create:** name `on_product_restocked`, table `public.products`, event **UPDATE** only, URL `https://dinas-studio.pages.dev/api/restock-notification`, header `x-webhook-secret` set to the same `WEBHOOK_SECRET` the order webhook uses.
-
-To check it end to end: join the waiting list for a piece, set that piece to Sold Out, then back to In Stock. The email should arrive and the name should disappear from the Waiting list.
-
-**The function ignores everything except Sold Out → in stock.** A price edit, new photos, or a piece going out of stock all arrive at the same webhook and must not send — that is the single most important behaviour here, and `tests/restock-notification.test.mjs` covers each case.
+Gmail may file the email under Important rather than Primary. That is a per-recipient judgement based on the recipient's own history and is not something worth engineering against.
 
 ## Remaining concerns after that
 
