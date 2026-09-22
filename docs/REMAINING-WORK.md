@@ -57,7 +57,7 @@ Gmail may file the email under Important rather than Primary. That is a per-reci
 
 | Item | Notes |
 |---|---|
-| **Per-product URLs** | The site is one page, so 17 products produce one indexable URL and nothing can rank individually. The largest remaining job, and the main SEO ceiling. |
+| **Per-product URLs** | Designed, not built: [`2026-09-22-per-product-urls-design.md`](superpowers/specs/2026-09-22-per-product-urls-design.md). `/p/<slug>-<id>` served by an edge function that rewrites the head, so a piece can be shared as itself and Google has 17 things to rank. The largest remaining job. |
 | **Admin shopping** | Decided to leave as is. Admins can place orders; no security issue, but test orders land among real revenue. |
 | **Orphaned photo uploads** | Accepted. If publishing fails after photos upload, the files remain in storage. |
 | **Payment links** | Deferred, not now. For the UAE, Ziina or Mamo send a link over WhatsApp with no site integration; Lebanon realistically stays on Whish. |
