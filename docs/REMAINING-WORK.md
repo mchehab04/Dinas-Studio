@@ -1,6 +1,6 @@
 # Remaining work — Dina's Studio
 
-Handoff for picking this project up in a later session. Last updated 2026-09-21.
+Handoff for picking this project up in a later session. Last updated 2026-09-22.
 
 ## Where things stand
 
@@ -53,7 +53,7 @@ Part 3 of [the spec](superpowers/specs/2026-09-17-stock-and-restock-design.md), 
 
 Gmail may file the email under Important rather than Primary. That is a per-recipient judgement based on the recipient's own history and is not something worth engineering against.
 
-## Per-product URLs — built, waiting to be deployed
+## Per-product URLs — live
 
 [Spec](superpowers/specs/2026-09-22-per-product-urls-design.md). Every piece has its own address: `/p/<slug>-<id>`, e.g. `/p/black-cotton-set-1`.
 
@@ -63,12 +63,9 @@ Gmail may file the email under Important rather than Primary. That is a per-reci
 - **Cards are real `<a href>`** with clicks intercepted for the SPA feel. Back and Forward move between the shop and a piece.
 - **No new secrets.** Products are world-readable, so it uses the publishable key, with `SUPABASE_URL`/`SUPABASE_ANON_KEY` as optional overrides.
 
-### After deploying
+Deployed, sitemap resubmitted, and a shared link confirmed to preview the right piece.
 
-1. Open two or three pieces and confirm the address bar follows.
-2. Paste a product link into WhatsApp — the preview should show that piece, not the logo.
-3. Search Console → resubmit `https://dinasstudio.com/sitemap.xml` so the new URLs are discovered.
-4. Watch Coverage over the following weeks. Pages indexed without content is the signal to server-render the body text — deliberately deferred until there's evidence it's needed.
+**The one thing still worth watching:** Search Console → Coverage, over the coming weeks. If the product pages come back indexed but thin, that is the signal to server-render the body text into the page — deliberately deferred until there is evidence it is needed, since Google renders JavaScript for a site this size.
 
 ## Remaining concerns after that
 
