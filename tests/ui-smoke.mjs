@@ -4,16 +4,20 @@
 // paid/unpaid accounting.
 //
 // Run:
-//   1. python -m http.server 8790 --bind 127.0.0.1   (from public/)
+//   1. npx wrangler pages dev public --port 8790
+//      (Cloudflare's runtime, not a plain static server: /p/<slug>-<id> is
+//      served by a Function, so a static server cannot answer it at all.)
 //   2. npx playwright install chromium-headless-shell  (first time only)
-//   3. npx --yes playwright@1.63 node tests/ui-smoke.mjs
-//      — or, with playwright already installed: node tests/ui-smoke.mjs
+//   3. node tests/ui-smoke.mjs
 //
 // Playwright is deliberately not a project dependency; this is an occasional
 // check, not part of a build. The page reads live products from Supabase and
 // writes nothing — the sold-out path is driven by handing the real handler the
 // error the database raises, so no order is ever placed.
 import { chromium } from 'playwright';
+
+// Override with BASE=http://127.0.0.1:<port> when the default port is busy.
+const BASE = process.env.BASE || 'http://127.0.0.1:8790';
 
 const errors = [];
 const out = [];
@@ -24,7 +28,7 @@ const page = await browser.newPage();
 page.on('console', m => { if (m.type() === 'error') errors.push(m.text()); });
 page.on('pageerror', e => errors.push('pageerror: ' + e.message));
 
-await page.goto('http://127.0.0.1:8790/', { waitUntil: 'networkidle' });
+await page.goto(BASE + '/', { waitUntil: 'networkidle' });
 await page.waitForSelector('.card, .grid-message', { timeout: 25000 });
 
 const cards = await page.locator('.card').count();
@@ -342,6 +346,51 @@ check('both sizes are uploaded for each new photo', photos.bothVariants);
 check('the -sm/-lg pairing still resolves', photos.smallVariantStillWorks);
 check(`paths are no longer named by position (${photos.uploaded[0]})`,
   !/\/(0|1|2|3)-(sm|lg)\.webp$/.test(photos.uploaded[0]));
+
+// Per-product URLs: the address bar has to follow what's on screen, and a
+// shared link has to open the right piece on its own.
+const first = await page.evaluate(() => ({ id: PRODUCTS[0].id, name: PRODUCTS[0].name, path: productPath(PRODUCTS[0]) }));
+
+// The client builds these paths and the Function serving them builds its own;
+// they must agree, or every shared link takes a redirect on the way in.
+// redirect:'manual' reports 0 for a 301, so 200 means already canonical.
+const canonical = await page.evaluate(async p => {
+  const res = await fetch(p, { redirect: 'manual' });
+  return res.status;
+}, first.path);
+check(`the client's path is already canonical (${first.path})`, canonical === 200);
+
+await page.goto(BASE + '/', { waitUntil: 'networkidle' });
+await page.waitForSelector('.card', { timeout: 20000 });
+
+await page.locator('.card-link').first().click();
+await page.waitForTimeout(400);
+check(`clicking a piece puts it in the address bar (${new URL(page.url()).pathname})`,
+  new URL(page.url()).pathname === first.path);
+check('the card is a real link a crawler can follow',
+  (await page.locator('.card-link').first().getAttribute('href')) === first.path);
+
+await page.evaluate(() => closeAllSheets());
+await page.waitForTimeout(300);
+check('closing the piece returns to the shop', new URL(page.url()).pathname === '/');
+
+await page.goBack();
+await page.waitForTimeout(400);
+check('Back reopens the piece', new URL(page.url()).pathname === first.path);
+check('and the sheet is open again', await page.locator('#pdSheet.open').count() === 1);
+
+await page.goForward();
+await page.waitForTimeout(400);
+check('Forward closes it again', new URL(page.url()).pathname === '/');
+
+// Landing straight on a shared link.
+const landed = await page.goto(BASE + first.path, { waitUntil: 'networkidle' });
+await page.waitForTimeout(1200);
+check('a shared link serves 200', landed.status() === 200);
+check('and opens that piece on arrival', await page.locator('#pdSheet.open').count() === 1);
+check('with that piece in the title', (await page.title()).startsWith(first.name));
+const shown = await page.locator('#pdContent .pd-title').innerText().catch(() => '');
+check(`the piece shown is the one asked for ("${shown}")`, shown === first.name);
 
 check('no console errors', errors.length === 0);
 console.log(out.join('\n'));

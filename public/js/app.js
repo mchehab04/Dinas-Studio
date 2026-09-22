@@ -57,6 +57,18 @@ function escHtml(v){
     .replace(/"/g, '&quot;').replace(/'/g, '&#39;');
 }
 
+// Mirrors slugify/productPath in lib/product-page.js, which serves these URLs.
+// No build step here, so the two are kept in step by hand — tests/ui-smoke.mjs
+// checks they still agree.
+function slugify(name){
+  return String(name || '')
+    .normalize('NFKD').replace(/[̀-ͯ]/g, '')
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/^-+|-+$/g, '') || 'piece';
+}
+function productPath(p){ return `/p/${slugify(p.name)}-${p.id}`; }
+
 function formatPrice(amount) {
   return `AED ${amount} · $${(amount / AED_PER_USD).toFixed(2)}`;
 }
@@ -474,7 +486,7 @@ function renderGrid(){
         <span class="stock-tag ${p.stock}">${stockLabel(p.stock)}</span>
         <button class="wish-btn ${state.wishlist.has(p.id)?'active':''}" data-wish-id="${p.id}" aria-pressed="${state.wishlist.has(p.id)}" aria-label="Save ${p.name} to wishlist" onclick="event.stopPropagation(); toggleWish(${p.id})">${heartSVG()}</button>
       </div>
-      <a class="card-link" href="#" aria-label="View ${p.name}, ${formatPrice(p.price)}" onclick="event.preventDefault(); openProduct(${p.id});"></a>
+      <a class="card-link" href="${productPath(p)}" aria-label="View ${p.name}, ${formatPrice(p.price)}" onclick="event.preventDefault(); openProduct(${p.id});"></a>
       <div class="card-body">
         <span class="card-cat" aria-hidden="true">${p.cat}</span>
         <span class="card-name" aria-hidden="true">${p.name}</span>
@@ -560,13 +572,18 @@ let currentProduct = null;
 let currentSize = null;
 let currentSlide = 0;
 
-function openProduct(id){
+// push=false when the URL already points here: arriving on /p/... directly, or
+// stepping through history. Pushing then would add an entry for a move the
+// visitor did not make.
+function openProduct(id, push=true){
   currentProduct = PRODUCTS.find(x=>x.id===id);
   if(!currentProduct) return;
   currentSize = currentProduct.sizes.find(s=>!currentProduct.soldOut.includes(s)) || currentProduct.sizes[0];
   currentSlide = 0;
   renderProductDetail();
   openSheet('pdSheet');
+  const path = productPath(currentProduct);
+  if(push && location.pathname !== path) history.pushState({ productId: id }, '', path);
 }
 
 
@@ -2139,17 +2156,23 @@ async function updateStatus(orderId, newStatus) {
 function openSheet(id){
   // Sheets are full-screen and share one overlay, so opening any of them closes
   // the rest. Without this, a sheet opened from inside another — a piece opened
-  // from the saved-items list — leaves both stacked.
-  closeAllSheets();
+  // from the saved-items list — leaves both stacked. The URL is left alone:
+  // whoever is opening a sheet sets it, if it needs setting.
+  closeAllSheets({ keepUrl: true });
   document.getElementById('overlay').classList.add('open');
   const sheet = document.getElementById(id);
   if(sheet) sheet.classList.add('open');
 }
-function closeAllSheets(){
+function closeAllSheets(opts){
   document.getElementById('overlay').classList.remove('open');
   // Every .sheet in the page, rather than a hand-kept list of ids: a sheet
   // added later used to fall off that list and become impossible to close.
   document.querySelectorAll('.sheet').forEach(s => s.classList.remove('open'));
+  // Leaving a piece means leaving its URL, or the address bar would keep
+  // pointing at something no longer on screen.
+  if(!(opts && opts.keepUrl) && location.pathname.startsWith('/p/')){
+    history.pushState({}, '', '/');
+  }
 }
 
 /* ========================= NAV / MISC ========================= */
@@ -2204,6 +2227,14 @@ async function initApp() {
   updateBagBadge();
   updateWishBadge();
   routeAdminHash();
+
+  // Arriving on /p/... — from a shared link or a search result. The function
+  // that served the page says which piece; the path is the fallback for a
+  // cached shell that carries no marker.
+  const landed = typeof window.__OPEN_PRODUCT__ === 'number'
+    ? window.__OPEN_PRODUCT__
+    : productIdFromPath(location.pathname);
+  if(landed !== null && PRODUCTS.some(p => p.id === landed)) openProduct(landed, false);
 }
 
 // Admin isn't linked from customer-facing UI; the store owner reaches it via
@@ -2228,6 +2259,21 @@ async function routeAdminHash() {
 }
 
 window.addEventListener('hashchange', routeAdminHash);
+
+// The address bar is the source of truth after Back or Forward: open whichever
+// piece it names, or close the sheet if it names none.
+window.addEventListener('popstate', () => {
+  const id = productIdFromPath(location.pathname);
+  if(id !== null && PRODUCTS.some(p => p.id === id)) openProduct(id, false);
+  else closeAllSheets({ keepUrl: true });
+});
+
+// The id at the end of /p/<slug>-<id> is what resolves the piece; the words in
+// front are decoration, so a renamed piece keeps working.
+function productIdFromPath(pathname){
+  const m = /^\/p\/.*-(\d+)$/.exec(pathname || '');
+  return m ? Number(m[1]) : null;
+}
 
 // Arriving from a reset email: the Supabase client lifts the recovery token out
 // of the URL and fires this, which is the only reliable signal that the visit is

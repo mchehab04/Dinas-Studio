@@ -53,11 +53,27 @@ Part 3 of [the spec](superpowers/specs/2026-09-17-stock-and-restock-design.md), 
 
 Gmail may file the email under Important rather than Primary. That is a per-recipient judgement based on the recipient's own history and is not something worth engineering against.
 
+## Per-product URLs — built, waiting to be deployed
+
+[Spec](superpowers/specs/2026-09-22-per-product-urls-design.md). Every piece has its own address: `/p/<slug>-<id>`, e.g. `/p/black-cotton-set-1`.
+
+- **`functions/p/[slug].js`** (logic in `lib/product-page.js`) serves the ordinary shop shell with the head rewritten for that piece — title, description, `og:image`, canonical and Product JSON-LD — plus a marker telling the app which piece to open. Social scrapers never run JavaScript, so this is the whole reason a WhatsApp preview can work at all.
+- **The id at the end resolves the piece**, the words in front are decoration. A renamed piece keeps working, and a stale slug 301s to the canonical URL. No `slug` column, no migration.
+- **`/sitemap.xml` is generated** from the product list (`functions/sitemap.xml.js`); the static `public/sitemap.xml` was deleted so there is no question which answers.
+- **Cards are real `<a href>`** with clicks intercepted for the SPA feel. Back and Forward move between the shop and a piece.
+- **No new secrets.** Products are world-readable, so it uses the publishable key, with `SUPABASE_URL`/`SUPABASE_ANON_KEY` as optional overrides.
+
+### After deploying
+
+1. Open two or three pieces and confirm the address bar follows.
+2. Paste a product link into WhatsApp — the preview should show that piece, not the logo.
+3. Search Console → resubmit `https://dinasstudio.com/sitemap.xml` so the new URLs are discovered.
+4. Watch Coverage over the following weeks. Pages indexed without content is the signal to server-render the body text — deliberately deferred until there's evidence it's needed.
+
 ## Remaining concerns after that
 
 | Item | Notes |
 |---|---|
-| **Per-product URLs** | Designed, not built: [`2026-09-22-per-product-urls-design.md`](superpowers/specs/2026-09-22-per-product-urls-design.md). `/p/<slug>-<id>` served by an edge function that rewrites the head, so a piece can be shared as itself and Google has 17 things to rank. The largest remaining job. |
 | **Admin shopping** | Decided to leave as is. Admins can place orders; no security issue, but test orders land among real revenue. |
 | **Orphaned photo uploads** | Accepted. If publishing fails after photos upload, the files remain in storage. |
 | **Payment links** | Deferred, not now. For the UAE, Ziina or Mamo send a link over WhatsApp with no site integration; Lebanon realistically stays on Whish. |
