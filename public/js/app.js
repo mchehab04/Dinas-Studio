@@ -83,6 +83,10 @@ function discountOf(p){
   return pct > 0 && pct <= 90 ? pct : 0;
 }
 function isOnSale(p){ return discountOf(p) > 0; }
+// Discounted AND still for sale. The banner's headline, the On Sale filter and
+// its chip all use this, so the banner can never point at a filter showing
+// something other than what it advertised.
+function saleAvailable(p){ return isOnSale(p) && p.stock !== 'out'; }
 function chargedPrice(p){
   const pct = discountOf(p);
   return pct ? Math.round(p.price * (100 - pct) / 100) : p.price;
@@ -341,6 +345,7 @@ let state = {
   bag: storageService.getCart(),
   user: null,
   filterAvail: new Set(),
+  saleOnly: false,
   filtersOpen: false,
   tab: "shop",
   paymentMethod: "cod",
@@ -419,6 +424,12 @@ function renderFilterPanel(){
     availRow.innerHTML = opts.map(([k,label]) => `
       <button class="chip ${state.filterAvail.has(k)?'active':''}" onclick="toggleAvail('${k}')">${label}</button>
     `).join('');
+    // Only offered while something can actually be bought at a discount — a
+    // filter that can only ever return nothing is worse than no filter.
+    if(PRODUCTS.some(saleAvailable)){
+      availRow.insertAdjacentHTML('beforeend',
+        `<button class="chip sale-chip ${state.saleOnly ? 'active' : ''}" onclick="setSaleFilter(${!state.saleOnly})">On Sale</button>`);
+    }
   }
 }
 function setCategory(c){
@@ -429,6 +440,13 @@ function setCategory(c){
 function toggleAvail(k){
   state.filterAvail.has(k) ? state.filterAvail.delete(k) : state.filterAvail.add(k);
   renderFilterPanel(); renderGrid();
+}
+// Also what the banner's "Shop the sale" button calls.
+function setSaleFilter(on){
+  state.saleOnly = !!on;
+  renderFilterPanel();
+  lastGridSignature = null;
+  renderGrid();
 }
 
 /* ========================= SORT ========================= */
@@ -451,10 +469,16 @@ document.addEventListener('click', (e)=>{
 function stockRank(s){ return s==="in"?0:s==="low"?1:2; }
 
 function getFiltered(){
+  // The sale can end under a shopper who is filtering to it — they buy its last
+  // piece, or it sells out elsewhere — and the chip that would switch the filter
+  // off disappears with it. Every grid render passes through here, so this is
+  // the one place that can release them rather than leave an empty grid.
+  if(state.saleOnly && !PRODUCTS.some(saleAvailable)) state.saleOnly = false;
   let list = PRODUCTS.filter(p=>{
     if(state.category!=="All" && p.cat!==state.category) return false;
     if(state.search && !p.name.toLowerCase().includes(state.search.toLowerCase())) return false;
     if(state.filterAvail.size>0 && !state.filterAvail.has(p.stock)) return false;
+    if(state.saleOnly && !saleAvailable(p)) return false;
     return true;
   });
   switch(state.sort){

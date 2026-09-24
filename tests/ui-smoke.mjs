@@ -425,6 +425,68 @@ check('and the percentage off', /−30%|-30%/.test(sale.cutHtml || ''));
 const was = /<span class="sale-was">([^<]*)<\/span>/.exec(sale.cutHtml || '');
 check(`the struck original is dirhams only (${was ? was[1] : 'missing'})`, !!was && was[1] === 'AED 599');
 
+// The On Sale filter. Live data may have nothing discounted, which would let a
+// broken filter pass by showing nothing — so discounts are set in-page on
+// three pieces: two buyable, one sold out. Nothing is written anywhere.
+const filter = await page.evaluate(() => {
+  const saved = PRODUCTS.map(p => ({ d: p.discountPercent, s: p.stock }));
+  PRODUCTS.forEach(p => { p.discountPercent = 0; });
+  const chipWithNoSale = !!document.querySelector('.sale-chip');
+  renderFilterPanel();
+  const chipWhenNothingDiscounted = !!document.querySelector('.sale-chip');
+
+  const [a, b, gone] = PRODUCTS;
+  a.stock = 'in';  a.discountPercent = 20;
+  b.stock = 'in';  b.discountPercent = 10;
+  gone.stock = 'out'; gone.discountPercent = 50;
+  renderFilterPanel(); lastGridSignature = null; renderGrid();
+  const before = document.querySelectorAll('.card').length;
+  const chipWhenOnSale = !!document.querySelector('.sale-chip');
+
+  setSaleFilter(true);
+  const shown = [...document.querySelectorAll('.card .card-name')].map(n => n.textContent.trim());
+  const chipActive = !!document.querySelector('.sale-chip.active');
+  setSaleFilter(false);
+  const restored = document.querySelectorAll('.card').length;
+
+  PRODUCTS.forEach((p, i) => { p.discountPercent = saved[i].d; p.stock = saved[i].s; });
+  renderFilterPanel(); lastGridSignature = null; renderGrid();
+  return { chipWhenNothingDiscounted, chipWhenOnSale, chipActive, shown,
+           want: [a.name, b.name], goneName: gone.name, before, restored };
+}).catch(e => ({ error: e.message }));
+if (filter.error) console.log('sale filter unavailable:', String(filter.error).slice(0, 160));
+check('no On Sale chip while nothing is discounted', filter.chipWhenNothingDiscounted === false);
+check('an On Sale chip appears once something is', filter.chipWhenOnSale === true);
+check(`the filter shows exactly the buyable discounted pieces (${(filter.shown || []).length})`,
+  Array.isArray(filter.shown) && filter.shown.length === 2 &&
+  filter.want.every(n => filter.shown.includes(n)));
+check('a sold-out discounted piece is left out', Array.isArray(filter.shown) && !filter.shown.includes(filter.goneName));
+check('the chip shows as active while filtering', filter.chipActive === true);
+check('turning it off restores the full grid', filter.restored === filter.before && filter.before > 0);
+
+// A shopper filtering to the sale who buys its last piece: markPiecesSold
+// re-renders the grid, nothing is discounted and buyable any more, and the chip
+// that would switch the filter off has gone. They must not be left looking at
+// an empty grid with no way out.
+const stranded = await page.evaluate(() => {
+  const saved = PRODUCTS.map(p => ({ d: p.discountPercent, s: p.stock }));
+  PRODUCTS.forEach(p => { p.discountPercent = 0; });
+  const only = PRODUCTS.find(p => p.stock !== 'out');
+  only.discountPercent = 30;
+  renderFilterPanel(); setSaleFilter(true);
+  const whileOnSale = document.querySelectorAll('.card').length;
+  markPiecesSold({ items: [{ productId: only.id }] });   // the checkout path
+  const afterLastSold = document.querySelectorAll('.card').length;
+  const chip = !!document.querySelector('.sale-chip');
+  PRODUCTS.forEach((p, i) => { p.discountPercent = saved[i].d; p.stock = saved[i].s; });
+  state.saleOnly = false; renderFilterPanel(); lastGridSignature = null; renderGrid();
+  return { whileOnSale, afterLastSold, chip, total: PRODUCTS.length };
+}).catch(e => ({ error: e.message }));
+if (stranded.error) console.log('stranded check unavailable:', String(stranded.error).slice(0, 160));
+check('filtering to a one-piece sale shows that piece', stranded.whileOnSale === 1);
+check(`selling the last sale piece does not strand the shopper on an empty grid (${stranded.afterLastSold} shown)`,
+  stranded.afterLastSold === stranded.total);
+
 check('no console errors', errors.length === 0);
 console.log(out.join('\n'));
 if (errors.length) console.log('\nconsole errors:\n' + errors.join('\n'));
