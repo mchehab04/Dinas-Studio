@@ -73,6 +73,31 @@ function formatPrice(amount) {
   return `AED ${amount} · $${(amount / AED_PER_USD).toFixed(2)}`;
 }
 
+// Mirrors the discount arithmetic in supabase/sale-pricing.sql, which is what
+// the customer is actually charged. If the two ever drift, the database wins
+// and the confirmation screen shows its numbers, not these.
+// tests/sale-rounding.test.mjs reads these functions out of this file and
+// checks them against the same model the database is tested against.
+function discountOf(p){
+  const pct = Number(p && p.discountPercent) || 0;
+  return pct > 0 && pct <= 90 ? pct : 0;
+}
+function isOnSale(p){ return discountOf(p) > 0; }
+function chargedPrice(p){
+  const pct = discountOf(p);
+  return pct ? Math.round(p.price * (100 - pct) / 100) : p.price;
+}
+
+// One price, or the original struck through above the new one. The original is
+// dirhams only: it is a reference point, and with its own dollar figure it ran
+// into the sale price on a narrow card and read as a single number.
+function priceHtml(p){
+  if(!isOnSale(p)) return formatPrice(p.price);
+  return `<span class="sale-was">AED ${p.price}</span>` +
+         `<span class="sale-now">${formatPrice(chargedPrice(p))}</span>` +
+         `<span class="sale-tag">−${discountOf(p)}%</span>`;
+}
+
 function shippingFor(subtotal, countryCode){
   const c = countryOf(countryCode);
   return subtotal >= c.freeOver ? 0 : c.shipping;
@@ -433,8 +458,8 @@ function getFiltered(){
     return true;
   });
   switch(state.sort){
-    case "price-asc": list.sort((a,b)=>a.price-b.price); break;
-    case "price-desc": list.sort((a,b)=>b.price-a.price); break;
+    case "price-asc": list.sort((a,b)=>chargedPrice(a)-chargedPrice(b)); break;
+    case "price-desc": list.sort((a,b)=>chargedPrice(b)-chargedPrice(a)); break;
     case "popularity": list.sort((a,b)=>b.pop-a.pop); break;
     case "availability": list.sort((a,b)=>stockRank(a.stock)-stockRank(b.stock)); break;
     case "new": list.sort((a,b)=>(b.nw===true)-(a.nw===true)); break;
@@ -486,13 +511,13 @@ function renderGrid(){
         <span class="stock-tag ${p.stock}">${stockLabel(p.stock)}</span>
         <button class="wish-btn ${state.wishlist.has(p.id)?'active':''}" data-wish-id="${p.id}" aria-pressed="${state.wishlist.has(p.id)}" aria-label="Save ${p.name} to wishlist" onclick="event.stopPropagation(); toggleWish(${p.id})">${heartSVG()}</button>
       </div>
-      <a class="card-link" href="${productPath(p)}" aria-label="View ${p.name}, ${formatPrice(p.price)}" onclick="event.preventDefault(); openProduct(${p.id});"></a>
+      <a class="card-link" href="${productPath(p)}" aria-label="View ${p.name}, ${formatPrice(chargedPrice(p))}" onclick="event.preventDefault(); openProduct(${p.id});"></a>
       <div class="card-body">
         <span class="card-cat" aria-hidden="true">${p.cat}</span>
         <span class="card-name" aria-hidden="true">${p.name}</span>
         <div class="card-bottom">
-          <span class="card-price" aria-hidden="true">${formatPrice(p.price)}</span>
-          <button class="add-btn" aria-label="Choose quantity for ${p.name}, ${formatPrice(p.price)}" onclick="event.stopPropagation(); quickAdd(${p.id})">
+          <span class="card-price" aria-hidden="true">${priceHtml(p)}</span>
+          <button class="add-btn" aria-label="Choose quantity for ${p.name}, ${formatPrice(chargedPrice(p))}" onclick="event.stopPropagation(); quickAdd(${p.id})">
             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3"><path d="M12 5v14M5 12h14"/></svg>
           </button>
         </div>
@@ -559,7 +584,7 @@ function renderWishlist(){
         <span class="bag-meta">${p.cat}</span>
         <div class="bag-bottom">
           <button class="filter-btn" onclick="event.stopPropagation(); quickAdd(${p.id})">Move to Bag</button>
-          <span class="bag-price">${formatPrice(p.price)}</span>
+          <span class="bag-price">${priceHtml(p)}</span>
         </div>
         <button class="remove-x" onclick="event.stopPropagation(); toggleWish(${p.id})">Remove</button>
       </div>
@@ -620,7 +645,7 @@ function renderProductDetail(){
     <div class="pd-body">
       <span class="pd-cat">${p.cat}</span>
       <h2 class="pd-title">${p.name}</h2>
-      <div class="pd-price">${formatPrice(p.price)}</div>
+      <div class="pd-price">${priceHtml(p)}</div>
       <p class="pd-desc">${p.desc}</p>
 
       <div class="pd-section-label">Size</div>
@@ -650,7 +675,7 @@ function renderProductDetail(){
     <div class="pd-footer">
       <button class="heart-toggle ${state.wishlist.has(p.id)?'active':''}" aria-label="Toggle wishlist" onclick="toggleWish(${p.id})">${heartSVG()}</button>
       <button class="primary-btn" onclick="${p.stock==='out' ? 'notifyMeForCurrentProduct()' : 'addCurrentToBag()'}">
-        ${p.stock==="out" ? "Notify Me When Available" : `Add to Bag · ${formatPrice(p.price)}`}
+        ${p.stock==="out" ? "Notify Me When Available" : `Add to Bag · ${formatPrice(chargedPrice(p))}`}
       </button>
     </div>
   `;
@@ -823,7 +848,7 @@ function renderBag(){
   const itemsHtml = state.bag.map((item, idx)=>{
     const p = PRODUCTS.find(x=>x.id===item.productId);
     if(!p) return '';
-    subtotal += p.price;
+    subtotal += chargedPrice(p);
     return `
       <div class="bag-item">
         <div class="bag-thumb" style="${productThumbStyle(p)}">${productMedia(p)}</div>
@@ -831,7 +856,7 @@ function renderBag(){
           <span class="bag-name">${p.name}</span>
           <span class="bag-meta">Size ${item.size}</span>
           <div class="bag-bottom">
-            <span class="bag-price">${formatPrice(p.price)}</span>
+            <span class="bag-price">${priceHtml(p)}</span>
           </div>
           <button class="remove-x" onclick="removeBagItem(${idx})">Remove</button>
         </div>
@@ -908,7 +933,7 @@ function renderCheckout() {
   let subtotal = 0;
   state.bag.forEach(item => {
     const p = PRODUCTS.find(x => x.id === item.productId);
-    if(p) subtotal += p.price;
+    if(p) subtotal += chargedPrice(p);
   });
   const shipping = shippingFor(subtotal, state.country);
   const total = subtotal + shipping;
@@ -1894,7 +1919,7 @@ async function renderAdmin() {
               <div class="inventory-meta">
                 <span>${p.cat}</span>
                 <span>•</span>
-                <strong style="color:var(--primary);">${formatPrice(p.price)}</strong>
+                <strong style="color:var(--primary);">${priceHtml(p)}</strong>
               </div>
             </div>
             <div class="stock-btn-group">

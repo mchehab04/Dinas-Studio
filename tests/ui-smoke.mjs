@@ -392,6 +392,39 @@ check('with that piece in the title', (await page.title()).startsWith(first.name
 const shown = await page.locator('#pdContent .pd-title').innerText().catch(() => '');
 check(`the piece shown is the one asked for ("${shown}")`, shown === first.name);
 
+// Sale pricing. Driven against the real helpers with stand-in products, so
+// nothing in the database is touched.
+const sale = await page.evaluate(() => {
+  const plain = { id: 901, name: 'Plain', cat: 'Abayas', price: 599, discountPercent: 0, stock: 'in', sizes: ['One Size'], soldOut: [], images: [] };
+  const cut   = { ...plain, id: 902, name: 'Cut', discountPercent: 30 };
+  const legacy = { id: 903, name: 'Legacy', cat: 'Abayas', price: 599, stock: 'in', sizes: ['One Size'], soldOut: [], images: [] };
+  return {
+    plainCharged: chargedPrice(plain),
+    cutCharged: chargedPrice(cut),
+    legacyCharged: chargedPrice(legacy),
+    plainOnSale: isOnSale(plain),
+    cutOnSale: isOnSale(cut),
+    legacyOnSale: isOnSale(legacy),
+    plainHtml: priceHtml(plain),
+    cutHtml: priceHtml(cut)
+  };
+}).catch(e => ({ error: e.message }));
+if (sale.error) console.log('sale helpers unavailable:', String(sale.error).slice(0, 160));
+check('a piece with no discount charges its price', sale.plainCharged === 599);
+check('a 30% discount charges 419', sale.cutCharged === 419);
+check('a row with no discountPercent at all is not on sale', sale.legacyOnSale === false && sale.legacyCharged === 599);
+check('0% is not on sale', sale.plainOnSale === false);
+check('30% is on sale', sale.cutOnSale === true);
+check('an undiscounted price renders without a strikethrough', typeof sale.plainHtml === 'string' && !/sale-was|sale-tag/.test(sale.plainHtml));
+check('a discounted price shows the original struck through', /sale-was/.test(sale.cutHtml || '') && (sale.cutHtml || '').includes('599'));
+check('and the new price', (sale.cutHtml || '').includes('419'));
+check('and the percentage off', /−30%|-30%/.test(sale.cutHtml || ''));
+// The struck original is a reference point, not a second full quote. Carrying
+// its own dollar figure, it ran straight into the sale price on a phone card
+// ("$163.10 AED 419") and read as one number.
+const was = /<span class="sale-was">([^<]*)<\/span>/.exec(sale.cutHtml || '');
+check(`the struck original is dirhams only (${was ? was[1] : 'missing'})`, !!was && was[1] === 'AED 599');
+
 check('no console errors', errors.length === 0);
 console.log(out.join('\n'));
 if (errors.length) console.log('\nconsole errors:\n' + errors.join('\n'));

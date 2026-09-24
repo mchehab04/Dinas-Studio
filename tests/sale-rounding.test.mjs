@@ -29,3 +29,32 @@ check('659 at 50% is 330 (329.5 rounds up)', model(659, 50) === 330);
 check('every result is a whole dirham',
   PRICES.every(p => PERCENTS.every(c => Number.isInteger(model(p, c)))));
 
+
+// --- the storefront's real implementation, pulled out of public/js/app.js
+// app.js is a classic browser script with no exports, so the two functions
+// are read out of the file and evaluated here. That is what lets this test
+// fail when app.js changes — a copy defined in this file never could.
+import { readFileSync } from 'node:fs';
+const appSrc = readFileSync(new URL('../public/js/app.js', import.meta.url), 'utf8');
+// From the declaration to the first closing brace at the start of a line.
+// Plain string search rather than a regex, so there is no escaping to get wrong.
+const grab = name => {
+  const start = appSrc.indexOf(`function ${name}(p){`);
+  if (start < 0) return null;
+  const end = appSrc.indexOf('\n}', start);
+  return end < 0 ? null : appSrc.slice(start, end + 2);
+};
+const appCode = [grab('discountOf'), grab('chargedPrice')];
+check('app.js defines discountOf and chargedPrice', appCode.every(Boolean));
+if (appCode.every(Boolean)) {
+  const appCharged = new Function(`${appCode.join('\n')}\nreturn chargedPrice;`)();
+  const drift = [];
+  for (const price of PRICES) for (const pct of PERCENTS) {
+    const got = appCharged({ price, discountPercent: pct });
+    if (got !== model(price, pct)) drift.push(`${price} @ ${pct}%: app.js ${got}, model ${model(price, pct)}`);
+  }
+  check(`app.js agrees with the model on all ${PRICES.length * PERCENTS.length} combinations`, drift.length === 0);
+  if (drift.length) console.log(drift.join('\n'));
+  check('app.js treats a row with no discountPercent as full price', appCharged({ price: 599 }) === 599);
+  check('app.js ignores an out-of-range discount rather than giving it away', appCharged({ price: 599, discountPercent: 95 }) === 599);
+}
