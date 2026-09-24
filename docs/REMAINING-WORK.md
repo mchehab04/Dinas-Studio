@@ -79,6 +79,24 @@ The connection details are read out of `public/js/supabaseClient.js` at run time
 
 Note: GitHub disables scheduled workflows on a repository with no activity for 60 days. Pushing anything re-enables it.
 
+## Sale pricing — built, waiting to be rolled out
+
+[Spec](superpowers/specs/2026-09-24-sale-pricing-and-banner-design.md) · [Plan](superpowers/plans/2026-09-24-sale-pricing-and-banner.md). Per-piece discounts set from the admin inventory row, charged by `place_order`, and announced by a generated slide in the hero carousel.
+
+- **Data:** `products."discountPercent"` (0–90, 0 = not on sale) and a one-row `shop_settings` table holding the optional banner line.
+- **Charging:** `place_order` applies the discount when it reprices, rounding half up to whole dirhams, and records `fullPrice` and `discountPercent` on each line. Free delivery is judged on the discounted subtotal.
+- **Shop:** struck original (dirhams only) above the sale price, an On Sale filter, and a hero carousel whose sale slide quotes the largest discount among pieces still for sale. With no sale the hero is pixel-identical to before.
+- **Admin:** a `Sale` button per inventory row opens an inline editor; Save stays disabled until the value is a whole number 1–90.
+- **Elsewhere:** product-page JSON-LD and meta description, the restock email, and the owner's order email (which shows what each discount gave away) all use the sale price.
+
+### Rollout
+
+1. **Run `supabase/sale-pricing.sql`.** Adds the column, `shop_settings` and its policies, and replaces `place_order`. Safe on the live site: every piece starts at 0.
+2. **Optional:** run `supabase/verify-place-order.sql` — it now needs step 1 first, and checks the discount is charged and that delivery is judged on the discounted subtotal, then rolls everything back.
+3. **Deploy.**
+
+Either order is genuinely safe. Before the SQL, products have no `discountPercent` field, which reads as no discount, and the storefront doesn't request `shop_settings` at all — so there is no 404 in visitors' consoles.
+
 ## Remaining concerns after that
 
 | Item | Notes |
@@ -92,6 +110,8 @@ Note: GitHub disables scheduled workflows on a repository with no activity for 6
 
 - **A service-role key bypasses RLS but still needs table grants.** They are separate mechanisms, and a missing `grant ... to service_role` fails as `42501 permission denied` with a perfectly valid key. Any new table a Pages function reads needs that grant, and Postgres names it in the error hint — read that before doubting the key.
 - **Escape anything a customer typed before it reaches `innerHTML`** — use `escHtml()` in `public/js/app.js`. The admin panel is the sharp case: anyone at all can insert a restock request, so an unescaped email or phone number would run as script in the owner's session, with the owner's privileges. `tests/ui-smoke.mjs` has a regression check that was confirmed to fail without the escaping.
+- **The discount formula lives in three places** — `supabase/sale-pricing.sql` (what is charged), `public/js/app.js` (what the shop shows) and `lib/product-page.js` (what Google and WhatsApp are told; the restock email imports it). `node tests/sale-rounding.test.mjs` reads the real functions out of both JS files and checks them against one model over 143 price/percentage combinations. Change one, run it.
+- **`saleAvailable(p)` is the one definition of "on sale and buyable".** The banner headline, the On Sale filter and its chip all use it; keep it that way, or the banner can promise what the filter won't show.
 - **Every file in `functions/` becomes a route.** Keep tests and shared code out of it — logic lives in `lib/`, and `functions/api/` holds only thin adapters. The Netlify equivalent of this mistake once broke a build.
 - **Functions read `env`, not `process.env`.** Workers have no `process.env`; `lib/order-notification.js` takes `env` as an argument.
 - **Test locally on Cloudflare's runtime before pushing:** `npx wrangler pages dev public --binding RESEND_API_KEY=test NOTIFY_TO=a@x.com WEBHOOK_SECRET=test`. A pass under plain Node once hid a real bundling failure.
