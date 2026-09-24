@@ -1,6 +1,8 @@
 -- ============================================================
 -- Checks place_order against real data, then throws everything away.
 --
+-- Run after sale-pricing.sql: the discount case needs its column.
+--
 -- Safe to run on the live database: every statement is inside one transaction
 -- that ends in ROLLBACK, so the test order and the sold-out flags it sets are
 -- never committed. Read the NOTICE output for PASS/FAIL lines.
@@ -22,6 +24,8 @@ declare
   v_total numeric;
   v_ship numeric;
   v_sub numeric;
+  v_charged text;
+  v_full text;
   v_addr jsonb := '{"country":"AE","region":"Dubai","address":"Verify"}';
   v_cust jsonb := '{"name":"Verify","email":"verify@example.com","phone":"+971500000000"}';
   v_items jsonb;
@@ -50,6 +54,11 @@ begin
   end;
   perform set_config('request.jwt.claims', json_build_object('sub', v_user)::text, true);
 
+  -- The owner may have this piece marked down on the live site. Check 2 is
+  -- about undiscounted pricing, so take the discount off for the duration —
+  -- the whole script rolls back, so this never reaches the real row.
+  update public.products set "discountPercent" = 0 where id = v_id;
+
   -- 2. Prices come from the table, not the caller. Nothing about money is even
   --    accepted as an argument, so the strongest check is that the recorded
   --    total matches the table price plus the table's own shipping rule.
@@ -62,6 +71,38 @@ begin
     v_ship, case when v_price >= 350 then 'free over 350' else 'under 350' end;
   raise notice '%  total = subtotal + shipping (%)',
     case when v_total = v_sub + v_ship then 'PASS ' else 'FAIL ' end, v_total;
+
+  -- 2b. A discount is charged, not merely displayed. Check 2 has just sold the
+  --     piece, so it goes back in stock with the discount set before ordering
+  --     again. Afterwards only the discount is cleared: the piece stays sold, so
+  --     check 3 still has an 'out' to observe.
+  update public.products
+     set stock = 'in', "soldOut" = '[]', "discountPercent" = 25
+   where id = v_id;
+  select t.subtotal, t.items->0->>'price', t.items->0->>'fullPrice'
+    into v_sub, v_charged, v_full
+    from public.place_order('VERIFY-2b', '1 Jan 2026', v_cust, v_addr, 'cod', v_items) t;
+  raise notice '%  a 25%% discount is charged: % (was %)',
+    case when v_sub = round(v_price * 0.75) then 'PASS ' else 'FAIL ' end, v_sub, v_price;
+  raise notice '%  the order records what was given away (charged %, full %)',
+    case when v_charged::numeric = round(v_price * 0.75) and v_full::numeric = v_price
+         then 'PASS ' else 'FAIL ' end, v_charged, v_full;
+  update public.products set "discountPercent" = 0 where id = v_id;
+
+  -- 2c. Free delivery is judged on what the customer pays, not the full price.
+  --     Priced so the full price clears the AED 350 threshold and the
+  --     discounted one does not. 599 at 50% is 299.5, so this is also the case
+  --     that pins half-up rounding inside the database itself.
+  update public.products
+     set stock = 'in', "soldOut" = '[]', price = 599, "discountPercent" = 50
+   where id = v_id;
+  select t.subtotal, t.shipping into v_sub, v_ship
+    from public.place_order('VERIFY-2c', '1 Jan 2026', v_cust, v_addr, 'cod', v_items) t;
+  raise notice '%  the database rounds half up: 599 at 50%% charges %',
+    case when v_sub = 300 then 'PASS ' else 'FAIL ' end, v_sub;
+  raise notice '%  delivery is judged on the discounted subtotal: % charged on %',
+    case when v_ship = 25 then 'PASS ' else 'FAIL ' end, v_ship, v_sub;
+  update public.products set "discountPercent" = 0 where id = v_id;
 
   -- 3. That order marked the piece sold, so the next one must be refused.
   raise notice '%  the sale marked the piece sold out',
@@ -84,7 +125,11 @@ begin
       case when sqlerrm = 'duplicate_item' then 'PASS ' else 'FAIL ' end, sqlerrm;
   end;
 
-  -- 5. A size the piece does not come in.
+  -- 5. A size the piece does not come in. The piece was sold above, and
+  --    place_order refuses a sold piece before it ever looks at the size — so
+  --    without putting it back in stock this check can only see sold_out.
+  update public.products set stock = 'in', "soldOut" = '[]' where id = v_id;
+
   begin
     perform public.place_order('VERIFY-5', '1 Jan 2026', v_cust, v_addr, 'cod',
       jsonb_build_array(jsonb_build_object('productId', v_id, 'size', 'Tampered')));

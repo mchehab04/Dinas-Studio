@@ -7,6 +7,9 @@
 --   profiles-email-integrity.sql
 --   place-order.sql             REQUIRED — checkout calls place_order, and
 --                               nothing below grants a direct insert into orders
+--   sale-pricing.sql            REQUIRED after place-order.sql — replaces it with
+--                               the version that charges discounts, and adds
+--                               shop_settings
 -- (order-paid-flag.sql is already folded into the orders table below.)
 -- ============================================================
 
@@ -104,7 +107,11 @@ create table public.products (
   fabric text,
   nw boolean not null default false,
   "paletteIndex" int not null default 0,
-  images jsonb not null default '[]'
+  images jsonb not null default '[]',
+  -- 0 means not on sale. Named to match the guard in sale-pricing.sql, so
+  -- running that afterwards on a fresh database doesn't add it twice.
+  "discountPercent" int not null default 0
+    constraint products_discount_range check ("discountPercent" >= 0 and "discountPercent" <= 90)
 );
 
 alter table public.products enable row level security;
