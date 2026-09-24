@@ -58,3 +58,20 @@ if (appCode.every(Boolean)) {
   check('app.js treats a row with no discountPercent as full price', appCharged({ price: 599 }) === 599);
   check('app.js ignores an out-of-range discount rather than giving it away', appCharged({ price: 599, discountPercent: 95 }) === 599);
 }
+
+// --- the product-page function's copy, which is what Google and WhatsApp see
+const lib = await import('../lib/product-page.js');
+check('lib/product-page.js exports chargedPrice', typeof lib.chargedPrice === 'function');
+if (typeof lib.chargedPrice === 'function') {
+  const drift = [];
+  for (const price of PRICES) for (const pct of PERCENTS) {
+    const got = lib.chargedPrice({ price, discountPercent: pct });
+    if (got !== model(price, pct)) drift.push(`${price} @ ${pct}%: lib ${got}, model ${model(price, pct)}`);
+  }
+  check(`lib agrees with the model on all ${PRICES.length * PERCENTS.length} combinations`, drift.length === 0);
+  if (drift.length) console.log(drift.join('\n'));
+  check('lib treats a row with no discountPercent as full price', lib.chargedPrice({ price: 599 }) === 599);
+  // PostgREST sends price as a JSON number today, but the function coerces it,
+  // so a string from any other caller can't turn "599" into string arithmetic.
+  check('lib copes with the price arriving as a string', lib.chargedPrice({ price: '599', discountPercent: 30 }) === 419);
+}

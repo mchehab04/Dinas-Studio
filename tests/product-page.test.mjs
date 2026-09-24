@@ -49,6 +49,17 @@ check('product JSON-LD carries the price', ld.offers.price === '599.00' && ld.of
 check('product JSON-LD says in stock', ld.offers.availability === 'https://schema.org/InStock');
 check('the shop Organization block is left alone', html.includes('"@type": "Organization"'));
 
+// A discounted piece has to be quoted at what it is actually sold for — to
+// Google through the JSON-LD, and to WhatsApp and search through the meta
+// description. Showing the full price there would be the one place the shop
+// advertises a price nobody can pay.
+const onSale = renderHead(SHELL, { ...PRODUCT, discountPercent: 30 }, 'https://dinasstudio.com');
+const saleLd = JSON.parse(/<script type="application\/ld\+json">(\{"@context":"https:\/\/schema\.org","@type":"Product"[\s\S]*?)<\/script>/.exec(onSale)[1]);
+check('a discounted piece quotes the sale price to Google', saleLd.offers.price === '419.00');
+check('and in its meta description', /<meta name="description" content="[^"]*AED 419/.test(onSale));
+check('the full price is not quoted as the offer', !/<meta name="description" content="[^"]*AED 599/.test(onSale));
+check('an undiscounted piece is unaffected', ld.offers.price === '599.00');
+
 const soldOut = renderHead(SHELL, { ...PRODUCT, stock: 'out' }, 'https://dinasstudio.com');
 check('a sold-out piece reports OutOfStock', soldOut.includes('https://schema.org/OutOfStock'));
 

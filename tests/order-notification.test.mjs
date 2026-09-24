@@ -100,6 +100,24 @@ check('customer: signature links the site', cust.html.includes('dinasstudio.com'
 // The owner messages every transfer customer, so their number is one tap away.
 check('owner: customer phone is a wa.me link', owner.html.includes('https://wa.me/9613123456'));
 
+// A discounted line. place_order records fullPrice and discountPercent beside
+// the charged total; the owner's copy shows what the sale gave away, because
+// it is the copy used to reconcile takings. The customer sees what they paid.
+reset();
+await handler(new Request('https://x/', { method: 'POST', headers: { 'x-webhook-secret': 's3cret' },
+  body: JSON.stringify({ record: { ...ORDER,
+    items: [{ name: 'Silk Jacquard Set', size: 'One Size', qty: 1, total: 419, fullPrice: 599, discountPercent: 30 }],
+    subtotal: 419, shipping: 0, total: 419 } }) }));
+check('owner: sees what a discount gave away', ownerMail().html.includes('was AED 599.00') && ownerMail().html.includes('−30%'));
+check('owner: still sees the charged line total', ownerMail().html.includes('AED 419.00'));
+check('customer: is not shown the discount arithmetic', !customerMail().html.includes('was AED 599.00'));
+check('customer: sees what they paid', customerMail().html.includes('AED 419.00'));
+
+// An order placed before discounts existed has no fullPrice at all.
+reset();
+await handler(req({ secret: 's3cret' }));
+check('owner: an undiscounted line shows no "was" price', !ownerMail().html.includes('was AED'));
+
 // The greeting uses only the first word of the name, so escaping has to be
 // proven with markup inside that first word.
 reset();

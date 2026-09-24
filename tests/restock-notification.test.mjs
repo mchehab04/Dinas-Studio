@@ -109,6 +109,16 @@ check('body is signed off', mail.html.includes("Dina's Studio") && mail.html.inc
 check('both are marked notified, in one call', patches().length === 1 && patches()[0].url.includes('id=in.(11,12)'));
 check('marked with a timestamp', !!patches()[0].body.notified_at);
 
+// --- a piece restocked while on sale is quoted at what it now costs
+reset([{ id: 51, email: 'a@x.com' }]);
+await run({ secret: 's3cret', record: { ...PRODUCT, discountPercent: 30 } });
+const saleMail = sends()[0] && sends()[0].body.html;
+check('a restocked piece on sale quotes the sale price', !!saleMail && saleMail.includes('AED 419.00'));
+check('and shows what it was, struck through', !!saleMail && /line-through[^>]*>AED 599\.00/.test(saleMail));
+reset([{ id: 52, email: 'a@x.com' }]);
+await run({ secret: 's3cret' });
+check('an undiscounted restock shows one price, not a strikethrough', !sends()[0].body.html.includes('line-through'));
+
 // --- an empty list costs nothing
 reset([]);
 await run({ secret: 's3cret' });
