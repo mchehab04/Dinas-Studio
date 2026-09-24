@@ -451,7 +451,7 @@ function renderFilterPanel(){
 
   const availRow = document.getElementById('availRow');
   if(availRow) {
-    const opts = [["in","In Stock"],["low","Low Stock"],["out","Notify Me"]];
+    const opts = [["in","In Stock"],["out","Notify Me"]];
     availRow.innerHTML = opts.map(([k,label]) => `
       <button class="chip ${state.filterAvail.has(k)?'active':''}" onclick="toggleAvail('${k}')">${label}</button>
     `).join('');
@@ -472,17 +472,18 @@ function toggleAvail(k){
   state.filterAvail.has(k) ? state.filterAvail.delete(k) : state.filterAvail.add(k);
   renderFilterPanel(); renderGrid();
 }
-// The banner's "Shop the sale" button: exactly the sale pieces, whatever the
-// shopper had filtered before — a category, an availability chip or leftover
-// search text would otherwise land them on "No pieces match". Cleared here
-// rather than in setSaleFilter, so the On Sale chip still combines with other
-// filters the way every other chip does.
-function shopTheSale(){
+// The banner buttons: "Shop the sale" (sale=true) lands on exactly the sale
+// pieces, "Shop the collection" on every piece. Either way the shopper's earlier
+// filters are cleared — a category, an availability chip or leftover search
+// text would otherwise land them on "No pieces match". Cleared here rather than
+// in setSaleFilter, so the On Sale chip still combines with other filters the
+// way every other chip does.
+function shopFromHero(sale){
   state.filterAvail = new Set();
   const search = document.getElementById('searchInput');
   if(search) search.value = '';
   setCategory('All');
-  setSaleFilter(true);
+  setSaleFilter(sale);
   scrollToShop();
 }
 
@@ -521,7 +522,7 @@ function getFiltered(){
   let list = PRODUCTS.filter(p=>{
     if(state.category!=="All" && p.cat!==state.category) return false;
     if(state.search && !p.name.toLowerCase().includes(state.search.toLowerCase())) return false;
-    if(state.filterAvail.size>0 && !state.filterAvail.has(p.stock)) return false;
+    if(state.filterAvail.size>0 && !state.filterAvail.has(p.stock === "low" ? "in" : p.stock)) return false;
     if(state.saleOnly && !saleAvailable(p)) return false;
     return true;
   });
@@ -564,7 +565,7 @@ function saleSlide(){
       <div class="eyebrow">sale</div>
       <h1>Up to ${top}% off selected pieces</h1>
       ${saleNoteText ? `<p>${escHtml(saleNoteText)}</p>` : ''}
-      <button class="hero-cta" onclick="shopTheSale()">Shop the sale ${HERO_ARROW}</button>
+      <button class="hero-cta" onclick="shopFromHero(true)">Shop the sale ${HERO_ARROW}</button>
     </div>`;
 }
 

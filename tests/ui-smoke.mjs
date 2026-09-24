@@ -708,11 +708,11 @@ const cta = await page.evaluate(() => {
   const otherCat = CATEGORIES.find(c => c !== 'All' && !onSale.some(p => p.cat === c)) || 'Accessories';
   renderHero(); renderFilterPanel();
   setCategory(otherCat);
-  state.filterAvail = new Set(['low']);
+  state.filterAvail = new Set(['out']);
   document.getElementById('searchInput').value = 'zzz-nothing-matches';
   lastGridSignature = null; renderGrid();
 
-  shopTheSale();
+  shopFromHero(true);
   const shown = [...document.querySelectorAll('.card .card-name')].map(n => n.textContent.trim());
   const out = { shown, want: onSale.map(p => p.name),
                 category: state.category, avail: state.filterAvail.size,
@@ -728,6 +728,46 @@ if (cta.error) console.log('shop-the-sale check unavailable:', String(cta.error)
 check(`"Shop the sale" lands on exactly the sale pieces despite other filters (${(cta.shown || []).length} shown)`,
   Array.isArray(cta.shown) && cta.shown.length === cta.want.length && cta.want.every(n => cta.shown.includes(n)));
 check('it resets the category, availability chips and search', cta.category === 'All' && cta.avail === 0 && cta.search === '');
+
+// The first slide's "Shop the collection" is the way back: after "Shop the
+// sale" it has to show every piece again, not leave the sale filter on.
+const back = await page.evaluate(() => {
+  const saved = PRODUCTS.map(p => p.discountPercent);
+  PRODUCTS.forEach(p => { p.discountPercent = 0; });
+  PRODUCTS.find(p => p.stock !== 'out').discountPercent = 25;
+  renderHero(); renderFilterPanel();
+  shopFromHero(true);
+  const onSale = document.querySelectorAll('.card').length;
+  setCategory(CATEGORIES.find(c => c !== 'All') || 'All');
+  shopFromHero(false);
+  const out = { onSale, shown: document.querySelectorAll('.card').length, total: PRODUCTS.length,
+                saleOnly: state.saleOnly, category: state.category };
+  PRODUCTS.forEach((p, i) => { p.discountPercent = saved[i]; });
+  lastGridSignature = null; renderGrid(); renderHero(); renderFilterPanel();
+  return out;
+}).catch(e => ({ error: e.message }));
+if (back.error) console.log('shop-the-collection check unavailable:', String(back.error).slice(0, 160));
+check(`"Shop the collection" after "Shop the sale" shows every piece again (${back.onSale} -> ${back.shown} of ${back.total})`,
+  back.shown === back.total && back.saleOnly === false && back.category === 'All');
+check('the first slide\'s button calls it',
+  await page.evaluate(() => /shopFromHero\(false\)/.test(document.querySelector('#heroTrack .hero-cta').getAttribute('onclick'))));
+
+// Low stock is still a piece you can buy: there is no separate chip for it,
+// and "In Stock" includes it.
+const avail = await page.evaluate(() => {
+  const chips = [...document.querySelectorAll('#availRow .chip')].map(c => c.textContent.trim());
+  const piece = PRODUCTS.find(p => p.stock !== 'out');
+  const was = piece.stock; piece.stock = 'low';
+  state.filterAvail = new Set(['in']);
+  lastGridSignature = null; renderGrid();
+  const shown = [...document.querySelectorAll('.card .card-name')].some(n => n.textContent.trim() === piece.name);
+  piece.stock = was; state.filterAvail = new Set();
+  lastGridSignature = null; renderGrid(); renderFilterPanel();
+  return { chips, shown };
+}).catch(e => ({ error: e.message }));
+check(`no "Low Stock" availability chip (${(avail.chips || []).join(', ')})`,
+  Array.isArray(avail.chips) && !avail.chips.includes('Low Stock') && avail.chips.includes('In Stock'));
+check('"In Stock" includes low-stock pieces', avail.shown === true);
 
 // The hero must paint before any script runs. It used to be static HTML; if it
 // is built by JavaScript, the space above the grid is blank until the user and
