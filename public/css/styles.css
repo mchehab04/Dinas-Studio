@@ -148,6 +148,25 @@
   .searchbar svg{flex-shrink:0;}
 
   /* ===== Hero ===== */
+  /* ----- Hero carousel -----
+     Each slide is a .hero, so it keeps the card look the About page's hero
+     shares. The carousel takes the margin a lone .hero had and the track takes
+     the radius, so one rounded window holds the slides as they move. */
+  .hero-carousel{ margin:18px 18px 8px; }
+  .hero-track{
+    display:flex; overflow-x:auto; scroll-snap-type:x mandatory;
+    scrollbar-width:none; -webkit-overflow-scrolling:touch;
+    border-radius:var(--radius-lg);
+  }
+  .hero-track::-webkit-scrollbar{ display:none; }
+  /* Two classes, so this beats the responsive .hero margins below wherever
+     they sit: a margin on a 100%-wide flex item would overflow the track. */
+  .hero.hero-slide{ margin:0; border-radius:0; flex:0 0 100%; scroll-snap-align:start; }
+  .hero-dots{ display:flex; gap:6px; justify-content:center; margin-top:8px; }
+  .hero-dots:empty{ display:none; }   /* no sale: takes no space at all */
+  .hero-dot{ width:6px; height:6px; border-radius:50%; background:var(--line); cursor:pointer; transition:background .2s, transform .2s; }
+  .hero-dot.active{ background:var(--primary); transform:scale(1.25); }
+
   .hero{
     margin:18px 18px 8px;
     padding:30px 22px 26px;
@@ -389,6 +408,7 @@
   /* tablet: room to breathe now that #app widens at 640px too */
   @media (min-width:640px){
     .hero{margin:20px 26px; padding:36px 30px 32px;}
+    .hero-carousel{margin:20px 26px;}
     .hero h1{max-width:420px; font-size:36px;}
     .hero p{max-width:380px;}
   }
@@ -403,6 +423,7 @@
     .desktopnav button.active{color:var(--primary);}
     .topbar{padding:16px 34px;}
     .hero{margin:28px 34px; padding:48px 46px;}
+    .hero-carousel{margin:28px 34px;}
     .hero h1{max-width:560px; font-size:46px;}
     .hero p{max-width:460px; font-size:15px;}
     .section-head, .sortbar, .searchwrap, .about-content, .socials-section{padding-left:34px; padding-right:34px;}

@@ -191,6 +191,25 @@ const apiService = {
       throw e;
     }
   },
+  // The optional line under the sale banner's headline. One row; read signed
+  // out by every visitor, written only by an admin.
+  async getSaleNote() {
+    const { data, error } = await supabaseClient
+      .from('shop_settings').select('sale_note').eq('id', 1).single();
+    // PGRST205 is "no such table": the site deployed before sale-pricing.sql
+    // ran. There is no note to show yet, and logging it would put an error in
+    // every visitor's console until the migration is run. Anything else is a
+    // real failure and is logged. saveSaleNote stays loud either way, so the
+    // owner still finds out the moment she tries to use it.
+    if(error){ if(error.code !== 'PGRST205') console.error(error); return ''; }
+    return (data && data.sale_note) || '';
+  },
+  async saveSaleNote(text) {
+    const { error } = await supabaseClient
+      .from('shop_settings').update({ sale_note: text || null }).eq('id', 1);
+    if(error) { console.error(error); return false; }
+    return true;
+  },
   async updateProductStock(id, stockStatus) {
     const existing = PRODUCTS.find(x => x.id === id);
     if(!existing) return null;
@@ -498,6 +517,89 @@ function onSearchInput(){
   clearTimeout(searchDebounceTimer);
   searchDebounceTimer = setTimeout(renderGrid, 180);
 }
+
+/* ========================= HERO ========================= */
+let saleNoteText = '';
+let heroTimer = null;
+let heroIndex = 0;
+
+const HERO_ARROW = `<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3"><path d="M5 12h14M13 6l6 6-6 6"/></svg>`;
+
+// The sale slide is generated from the pieces on sale, so it can never
+// advertise a discount that is not actually available. It reads saleAvailable,
+// the same definition the On Sale filter uses, so the button on this slide
+// always opens a filter showing what the headline promised.
+function heroSlides(){
+  const slides = [`
+    <div class="hero hero-slide">
+      <div class="eyebrow">new season</div>
+      <h1>Wrapped in softness, styled with heart</h1>
+      <p>Matching sets, abayas &amp; kimonos designed for effortless elegance — made to move with you.</p>
+      <button class="hero-cta" onclick="scrollToShop()">Shop the collection ${HERO_ARROW}</button>
+    </div>`];
+
+  const onSale = PRODUCTS.filter(saleAvailable);
+  if(onSale.length){
+    const top = Math.max(...onSale.map(discountOf));
+    slides.push(`
+    <div class="hero hero-slide hero-sale">
+      <div class="eyebrow">sale</div>
+      <h1>Up to ${top}% off selected pieces</h1>
+      ${saleNoteText ? `<p>${escHtml(saleNoteText)}</p>` : ''}
+      <button class="hero-cta" onclick="setSaleFilter(true); scrollToShop();">Shop the sale ${HERO_ARROW}</button>
+    </div>`);
+  }
+  return slides;
+}
+
+function renderHero(){
+  const track = document.getElementById('heroTrack');
+  const dots = document.getElementById('heroDots');
+  if(!track || !dots) return;
+  const slides = heroSlides();
+  track.innerHTML = slides.join('');
+  track.scrollLeft = 0;
+  // One slide is the shop's usual state: no dots, no rotation, nothing to swipe.
+  dots.innerHTML = slides.length > 1
+    ? slides.map((_, i) => `<span class="hero-dot ${i === 0 ? 'active' : ''}" onclick="heroGo(${i})" aria-label="Show slide ${i + 1}" role="button"></span>`).join('')
+    : '';
+  heroIndex = 0;
+  startHeroRotation(slides.length);
+}
+
+function markHeroDot(i){
+  document.querySelectorAll('.hero-dot').forEach((d, idx) => d.classList.toggle('active', idx === i));
+}
+
+function heroGo(i){
+  const track = document.getElementById('heroTrack');
+  if(!track) return;
+  heroIndex = i;
+  track.scrollTo({ left: i * track.clientWidth, behavior: 'smooth' });
+  markHeroDot(i);
+}
+
+function startHeroRotation(count){
+  clearInterval(heroTimer);
+  heroTimer = null;
+  if(count < 2) return;
+  // Someone who has asked their system to reduce motion gets the slides and the
+  // dots, but nothing moves on its own.
+  if(window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches) return;
+  heroTimer = setInterval(() => heroGo((heroIndex + 1) % count), 6000);
+}
+
+// Before sale-pricing.sql runs there is no shop_settings table, and asking for
+// it makes the browser log a 404 in every visitor's console. Products carry no
+// discountPercent at all in that state — the migration gives every row one — so
+// that is what says the table is there to read.
+async function loadSaleNote(){
+  if(!PRODUCTS.some(p => 'discountPercent' in p)) return;
+  try { saleNoteText = await apiService.getSaleNote(); } catch(_){}
+}
+
+function pauseHero(){ clearInterval(heroTimer); heroTimer = null; }
+function resumeHero(){ startHeroRotation(document.querySelectorAll('.hero-slide').length); }
 
 let lastGridSignature = null;
 function renderGrid(){
@@ -2263,6 +2365,21 @@ async function retryProducts(){
   renderGrid();
 }
 
+// Touching, hovering or focusing the carousel holds it still; the dot follows a
+// swipe, so the track and the dots can never disagree about which slide is up.
+function wireHero(){
+  const carousel = document.getElementById('heroCarousel');
+  const track = document.getElementById('heroTrack');
+  if(!carousel || !track) return;
+  ['mouseenter','touchstart','focusin'].forEach(e => carousel.addEventListener(e, pauseHero, { passive: true }));
+  ['mouseleave','touchend','focusout'].forEach(e => carousel.addEventListener(e, resumeHero, { passive: true }));
+  track.addEventListener('scroll', () => {
+    if(!track.clientWidth) return;
+    const i = Math.round(track.scrollLeft / track.clientWidth);
+    if(i !== heroIndex){ heroIndex = i; markHeroDot(i); }
+  }, { passive: true });
+}
+
 async function initApp() {
   await loadCurrentUser();
   try {
@@ -2273,6 +2390,9 @@ async function initApp() {
   renderTopTabs();
   renderFilterPanel();
   renderGrid();
+  await loadSaleNote();
+  renderHero();
+  wireHero();
   updateBagBadge();
   updateWishBadge();
   routeAdminHash();

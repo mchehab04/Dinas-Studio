@@ -487,6 +487,111 @@ check('filtering to a one-piece sale shows that piece', stranded.whileOnSale ===
 check(`selling the last sale piece does not strand the shopper on an empty grid (${stranded.afterLastSold} shown)`,
   stranded.afterLastSold === stranded.total);
 
+// The hero carousel. Stock and discounts are set in-page so the sold-out case
+// is exercised whatever the live data holds; nothing is written anywhere.
+const hero = await page.evaluate(async () => {
+  const saved = PRODUCTS.map(p => ({ d: p.discountPercent, s: p.stock }));
+  const savedNote = saleNoteText;
+  PRODUCTS.forEach(p => { p.discountPercent = 0; });
+  renderHero();
+  const noSale = {
+    slides: document.querySelectorAll('.hero-slide').length,
+    dots: document.querySelectorAll('.hero-dot').length,
+    rotating: heroTimer !== null
+  };
+
+  // A sold-out piece must not set the headline for pieces still available.
+  const [buyable, gone] = PRODUCTS;
+  buyable.stock = 'in';  buyable.discountPercent = 20;
+  gone.stock = 'out';    gone.discountPercent = 50;
+  saleNoteText = '<img src=x onerror="window.__heroPwned=1">Ends Sunday';
+  window.__heroPwned = 0;
+  renderHero();
+  await new Promise(r => setTimeout(r, 100));
+  const text = document.querySelector('.hero-carousel').innerText;
+  const withSale = {
+    slides: document.querySelectorAll('.hero-slide').length,
+    dots: document.querySelectorAll('.hero-dot').length,
+    text,
+    noteInjected: document.querySelectorAll('.hero-carousel img').length,
+    pwned: window.__heroPwned,
+    sideways: document.documentElement.scrollWidth > window.innerWidth
+  };
+
+  // "Shop the sale" switches the filter on.
+  const btn = [...document.querySelectorAll('.hero-cta')].find(b => /Shop the sale/.test(b.textContent));
+  if (btn) btn.click();
+  const filterOn = state.saleOnly;
+
+  PRODUCTS.forEach((p, i) => { p.discountPercent = saved[i].d; p.stock = saved[i].s; });
+  saleNoteText = savedNote;
+  state.saleOnly = false; renderFilterPanel(); lastGridSignature = null; renderGrid();
+  renderHero();
+  return { noSale, withSale, filterOn };
+}).catch(e => ({ error: e.message }));
+if (hero.error) console.log('hero unavailable:', String(hero.error).slice(0, 160));
+const hs = hero.withSale || {}, hn = hero.noSale || {};
+check('with no sale there is a single slide', hn.slides === 1);
+check('and no dots', hn.dots === 0);
+check('and nothing rotates', hn.rotating === false);
+check('a sale adds a second slide', hs.slides === 2);
+check('and dots to move between them', hs.dots === 2);
+check('the headline quotes the largest buyable discount', /Up to 20% off/.test(hs.text || ''));
+check('a sold-out piece does not set the headline', !/50%/.test(hs.text || ''));
+check('the note is shown', /Ends Sunday/.test(hs.text || ''));
+check('the note cannot inject markup', hs.noteInjected === 0 && hs.pwned === 0);
+check('a running sale does not make the page scroll sideways', hs.sideways === false);
+check('"Shop the sale" switches the On Sale filter on', hero.filterOn === true);
+
+// Before sale-pricing.sql runs, shop_settings doesn't exist, and asking for it
+// makes the browser log a 404 in every visitor's console. Products carry no
+// discountPercent at all in that state, which is how the note request knows
+// to wait. After the migration it must still be fetched.
+const noteLoad = await page.evaluate(async () => {
+  const real = apiService.getSaleNote;
+  let calls = 0;
+  apiService.getSaleNote = async () => { calls++; return 'Ends Sunday'; };
+  const saved = PRODUCTS.map(p => p.discountPercent);
+  const savedNote = saleNoteText;
+
+  PRODUCTS.forEach(p => { delete p.discountPercent; });     // pre-migration rows
+  saleNoteText = '';
+  await loadSaleNote();
+  const before = { calls, note: saleNoteText };
+
+  PRODUCTS.forEach(p => { p.discountPercent = 0; });        // migrated rows
+  await loadSaleNote();
+  const after = { calls, note: saleNoteText };
+
+  apiService.getSaleNote = real;
+  PRODUCTS.forEach((p, i) => { p.discountPercent = saved[i]; });
+  saleNoteText = savedNote;
+  return { before, after };
+}).catch(e => ({ error: e.message }));
+if (noteLoad.error) console.log('note loading unavailable:', String(noteLoad.error).slice(0, 160));
+check('before the migration, the note is not requested', noteLoad.before && noteLoad.before.calls === 0);
+check('after it, the note is fetched', noteLoad.after && noteLoad.after.calls === 1);
+check('and shown', noteLoad.after && noteLoad.after.note === 'Ends Sunday');
+
+// Rotation: a sale's two slides advance on their own for most visitors, and
+// never for someone who has asked their system to reduce motion.
+const rotation = async reducedMotion => {
+  const ctx = await browser.newContext(reducedMotion ? { reducedMotion: 'reduce' } : {});
+  const pg = await ctx.newPage();
+  await pg.goto(BASE + '/', { waitUntil: 'networkidle' });
+  await pg.waitForSelector('.card', { timeout: 20000 });
+  const running = await pg.evaluate(() => {
+    const p = PRODUCTS.find(x => x.stock !== 'out');
+    p.discountPercent = 20;                 // in this page only
+    renderHero();
+    return heroTimer !== null;
+  });
+  await ctx.close();
+  return running;
+};
+check('a sale carousel advances on its own', await rotation(false) === true);
+check('but not for a visitor who asked to reduce motion', await rotation(true) === false);
+
 check('no console errors', errors.length === 0);
 console.log(out.join('\n'));
 if (errors.length) console.log('\nconsole errors:\n' + errors.join('\n'));
