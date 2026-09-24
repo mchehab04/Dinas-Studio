@@ -472,7 +472,20 @@ function toggleAvail(k){
   state.filterAvail.has(k) ? state.filterAvail.delete(k) : state.filterAvail.add(k);
   renderFilterPanel(); renderGrid();
 }
-// Also what the banner's "Shop the sale" button calls.
+// The banner's "Shop the sale" button: exactly the sale pieces, whatever the
+// shopper had filtered before — a category, an availability chip or leftover
+// search text would otherwise land them on "No pieces match". Cleared here
+// rather than in setSaleFilter, so the On Sale chip still combines with other
+// filters the way every other chip does.
+function shopTheSale(){
+  state.filterAvail = new Set();
+  const search = document.getElementById('searchInput');
+  if(search) search.value = '';
+  setCategory('All');
+  setSaleFilter(true);
+  scrollToShop();
+}
+
 function setSaleFilter(on){
   state.saleOnly = !!on;
   renderFilterPanel();
@@ -540,43 +553,48 @@ const HERO_ARROW = `<svg width="14" height="14" viewBox="0 0 24 24" fill="none" 
 // The sale slide is generated from the pieces on sale, so it can never
 // advertise a discount that is not actually available. It reads saleAvailable,
 // the same definition the On Sale filter uses, so the button on this slide
-// always opens a filter showing what the headline promised.
-function heroSlides(){
-  const slides = [`
-    <div class="hero hero-slide">
-      <div class="eyebrow">new season</div>
-      <h1>Wrapped in softness, styled with heart</h1>
-      <p>Matching sets, abayas &amp; kimonos designed for effortless elegance — made to move with you.</p>
-      <button class="hero-cta" onclick="scrollToShop()">Shop the collection ${HERO_ARROW}</button>
-    </div>`];
-
+// always opens a filter showing what the headline promised. '' when nothing
+// is on sale.
+function saleSlide(){
   const onSale = PRODUCTS.filter(saleAvailable);
-  if(onSale.length){
-    const top = Math.max(...onSale.map(discountOf));
-    slides.push(`
+  if(!onSale.length) return '';
+  const top = Math.max(...onSale.map(discountOf));
+  return `
     <div class="hero hero-slide hero-sale">
       <div class="eyebrow">sale</div>
       <h1>Up to ${top}% off selected pieces</h1>
       ${saleNoteText ? `<p>${escHtml(saleNoteText)}</p>` : ''}
-      <button class="hero-cta" onclick="setSaleFilter(true); scrollToShop();">Shop the sale ${HERO_ARROW}</button>
-    </div>`);
-  }
-  return slides;
+      <button class="hero-cta" onclick="shopTheSale()">Shop the sale ${HERO_ARROW}</button>
+    </div>`;
 }
 
+// Anything that changes which pieces are on sale and buyable calls this, so the
+// banner and the On Sale chip can't keep advertising a piece that has just
+// gone — or stay hidden when a sale has just become visible.
+function refreshSale(){
+  renderFilterPanel();
+  renderHero();
+}
+
+// Slide one is static HTML in index.html, so the hero paints before any script
+// or request and its <h1> is in the page crawlers read. Only the sale slide is
+// added and removed here — slide one is never rebuilt.
 function renderHero(){
   const track = document.getElementById('heroTrack');
   const dots = document.getElementById('heroDots');
   if(!track || !dots) return;
-  const slides = heroSlides();
-  track.innerHTML = slides.join('');
+  const previous = track.querySelector('.hero-sale');
+  if(previous) previous.remove();
+  const sale = saleSlide();
+  if(sale) track.insertAdjacentHTML('beforeend', sale);
+  const count = track.querySelectorAll('.hero-slide').length;
   track.scrollLeft = 0;
   // One slide is the shop's usual state: no dots, no rotation, nothing to swipe.
-  dots.innerHTML = slides.length > 1
-    ? slides.map((_, i) => `<span class="hero-dot ${i === 0 ? 'active' : ''}" onclick="heroGo(${i})" aria-label="Show slide ${i + 1}" role="button"></span>`).join('')
+  dots.innerHTML = count > 1
+    ? Array.from({ length: count }, (_, i) => `<span class="hero-dot ${i === 0 ? 'active' : ''}" onclick="heroGo(${i})" aria-label="Show slide ${i + 1}" role="button"></span>`).join('')
     : '';
   heroIndex = 0;
-  startHeroRotation(slides.length);
+  startHeroRotation(count);
 }
 
 function markHeroDot(i){
@@ -1045,16 +1063,29 @@ function setPaymentMethod(method) {
 // Country drives the region field, shipping and payment options at once, so the
 // whole form re-renders. Typed values are carried across rather than wiped —
 // the region resets deliberately, since last country's region is meaningless.
-function setCountry(code) {
-  if(!COUNTRIES[code]) return;
-  state.country = code;
-  if(!COUNTRIES[code].cod && state.paymentMethod === 'cod') state.paymentMethod = 'transfer';
+// What the bag costs at current prices. The checkout button and the re-check in
+// placeOrder both read this, so they can't total the same bag differently.
+function bagTotals(){
+  let subtotal = 0;
+  state.bag.forEach(item => {
+    const p = PRODUCTS.find(x => x.id === item.productId);
+    if(p) subtotal += chargedPrice(p);
+  });
+  const shipping = shippingFor(subtotal, state.country);
+  return { subtotal, shipping, total: subtotal + shipping };
+}
 
+// Re-renders the checkout without losing what the customer has typed. A country
+// change resets the region on purpose (last country's region is meaningless);
+// anything else keeps it.
+function rerenderCheckout(keepRegion){
   const typed = {};
   CHECKOUT_FIELDS.forEach(f => {
     const el = document.getElementById(f.id);
     if(el) typed[f.id] = el.value;
   });
+  const regionEl = document.getElementById('coRegion');
+  const region = keepRegion && regionEl ? regionEl.value : null;
 
   renderCheckout();
 
@@ -1063,18 +1094,20 @@ function setCountry(code) {
     if(el && typed[f.id] !== undefined) el.value = typed[f.id];
     updateCharCount(f);
   });
+  if(region !== null){ const r = document.getElementById('coRegion'); if(r) r.value = region; }
   refreshSubmit('checkout');
+}
+
+function setCountry(code) {
+  if(!COUNTRIES[code]) return;
+  state.country = code;
+  if(!COUNTRIES[code].cod && state.paymentMethod === 'cod') state.paymentMethod = 'transfer';
+  rerenderCheckout(false);
 }
 
 function renderCheckout() {
   const el = document.getElementById('checkoutContent');
-  let subtotal = 0;
-  state.bag.forEach(item => {
-    const p = PRODUCTS.find(x => x.id === item.productId);
-    if(p) subtotal += chargedPrice(p);
-  });
-  const shipping = shippingFor(subtotal, state.country);
-  const total = subtotal + shipping;
+  const { subtotal, shipping, total } = bagTotals();
   const country = countryOf(state.country);
 
   const defaultName = state.user ? state.user.name : "";
@@ -1179,6 +1212,23 @@ async function placeOrder() {
     return;
   }
 
+  // Prices can change while someone is at checkout — a sale ends, the owner
+  // edits a discount. place_order charges the database's price, so re-read
+  // prices now: if the total has gone UP since it was shown, stop and show the
+  // new one rather than charge more than the button said. A lower total goes
+  // through; the confirmation shows what was recorded. (sold_out is left to
+  // place_order, which already handles it.)
+  const shown = bagTotals().total;
+  try { PRODUCTS = await apiService.fetchProducts(); } catch(_){}
+  if(bagTotals().total > shown){
+    lastGridSignature = null;
+    renderGrid();
+    refreshSale();
+    rerenderCheckout(true);
+    showToast("Prices have changed since you opened checkout — please check the new total");
+    return;
+  }
+
   // Names, prices and totals are all filled in by the database. Sending them
   // from here is what let a tampered request set its own price.
   const orderPayload = {
@@ -1219,6 +1269,7 @@ function markPiecesSold(order){
   storageService.saveProducts(PRODUCTS);
   lastGridSignature = null;
   renderGrid();
+  refreshSale();
 }
 
 // A bag can sit open for days, so by checkout a piece may be gone. place_order
@@ -1241,6 +1292,7 @@ async function dropSoldOutFromBag(e){
   updateBagBadge();
   lastGridSignature = null;
   renderGrid();
+  refreshSale();
 
   closeAllSheets();
   showToast(`Sorry — ${names.join(' and ')} ${names.length > 1 ? 'were' : 'was'} just bought by someone else`);
@@ -2321,6 +2373,7 @@ async function setProductStock(productId, stockStatus) {
   showToast(`Updated "${updated.name}" to ${stockStatus.toUpperCase()} ✓`);
   await renderAdmin();
   renderGrid();
+  refreshSale();
   if(currentProduct && currentProduct.id === productId) {
     currentProduct.stock = stockStatus;
     renderProductDetail();
@@ -2461,6 +2514,9 @@ async function retryProducts(){
   }
   lastGridSignature = null;
   renderGrid();
+  // A first load that failed never fetched the note or built the sale slide.
+  await loadSaleNote();
+  refreshSale();
 }
 
 // Touching, hovering or focusing the carousel holds it still; the dot follows a

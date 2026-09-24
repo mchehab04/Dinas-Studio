@@ -122,8 +122,10 @@ begin
   -- browser said about money is ignored entirely, which is the second reason
   -- this function exists.
   --
-  -- Rounded to whole dirhams, half up. public/js/app.js and lib/product-page.js
-  -- repeat this for display; tests/sale-rounding.test.mjs pins all three.
+  -- A discounted price is rounded to whole dirhams, half up; an undiscounted
+  -- one is charged exactly as listed, since that is how the shop displays it.
+  -- public/js/app.js and lib/product-page.js repeat this for display;
+  -- tests/sale-rounding.test.mjs pins all three.
   -- fullPrice and discountPercent are recorded so an order says what a sale
   -- actually gave away.
   select jsonb_agg(jsonb_build_object(
@@ -132,12 +134,12 @@ begin
            'cat',             p.cat,
            'size',            elem->>'size',
            'qty',             1,
-           'price',           round(p.price * (100 - p."discountPercent") / 100.0),
-           'total',           round(p.price * (100 - p."discountPercent") / 100.0),
+           'price',           case when p."discountPercent" > 0 then round(p.price * (100 - p."discountPercent") / 100.0) else p.price end,
+           'total',           case when p."discountPercent" > 0 then round(p.price * (100 - p."discountPercent") / 100.0) else p.price end,
            'fullPrice',       p.price,
            'discountPercent', p."discountPercent"
          ) order by p.id),
-         sum(round(p.price * (100 - p."discountPercent") / 100.0))
+         sum(case when p."discountPercent" > 0 then round(p.price * (100 - p."discountPercent") / 100.0) else p.price end)
     into v_items, v_subtotal
     from jsonb_array_elements(p_items) elem
     join public.products p on p.id = (elem->>'productId')::bigint;

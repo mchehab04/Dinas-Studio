@@ -573,6 +573,183 @@ check('before the migration, the note is not requested', noteLoad.before && note
 check('after it, the note is fetched', noteLoad.after && noteLoad.after.calls === 1);
 check('and shown', noteLoad.after && noteLoad.after.note === 'Ends Sunday');
 
+// The banner and the On Sale chip have to follow stock as it changes during a
+// visit, on every path that changes it — not only on a full reload.
+const stale = await page.evaluate(async () => {
+  const saved = PRODUCTS.map(p => ({ d: p.discountPercent, s: p.stock }));
+  const realFetch = apiService.fetchProducts, realStock = apiService.updateProductStock;
+  const realOrders = apiService.getOrders, realReqs = apiService.getRestockRequests;
+  apiService.getOrders = async () => []; apiService.getRestockRequests = async () => [];
+  // The stand-in products below carry discountPercent, which is the signal that
+  // sale-pricing.sql has run; the live database this suite talks to may not have
+  // run it yet, so the note is stubbed rather than requested for real.
+  const realNote = apiService.getSaleNote;
+  apiService.getSaleNote = async () => '';
+  const headline = () => { const h = document.querySelector('.hero-sale h1'); return h ? h.textContent.trim() : '(no sale slide)'; };
+  const chip = () => !!document.querySelector('.sale-chip');
+  const reset = () => {
+    PRODUCTS.forEach(p => { p.discountPercent = 0; p.stock = 'in'; });
+    PRODUCTS[0].discountPercent = 50; PRODUCTS[1].discountPercent = 20;
+    renderHero(); renderFilterPanel();
+  };
+  const out = {};
+
+  // 1. A shopper buys the 50%-off piece at checkout.
+  reset();
+  markPiecesSold({ items: [{ productId: PRODUCTS[0].id }] });
+  out.afterBuying = headline();
+
+  // 2. The stale-bag path: the 50%-off piece went while the bag sat open.
+  reset();
+  apiService.fetchProducts = async () => PRODUCTS.map((p, i) => i === 0 ? { ...p, stock: 'out' } : { ...p });
+  state.bag = [{ productId: PRODUCTS[0].id, size: PRODUCTS[0].sizes[0] }];
+  await dropSoldOutFromBag({ message: 'sold_out:' + PRODUCTS[0].name });
+  out.afterStaleBag = headline();
+  closeAllSheets({ keepUrl: true });
+  state.bag = [];
+
+  // 3. The owner marks the only sale piece sold out from the admin panel.
+  PRODUCTS.forEach(p => { p.discountPercent = 0; p.stock = 'in'; });
+  PRODUCTS[0].discountPercent = 30;
+  renderHero(); renderFilterPanel();
+  apiService.updateProductStock = async (id, s) => { const p = PRODUCTS.find(x => x.id === id); p.stock = s; return p; };
+  adminTab = 'inventory';
+  await setProductStock(PRODUCTS[0].id, 'out');
+  out.afterOwnerSoldOut = { headline: headline(), chip: chip() };
+
+  // 4. The first load failed and the shopper tapped "Try again".
+  const snapshot = PRODUCTS.map(p => ({ ...p, discountPercent: 0, stock: 'in' }));
+  snapshot[0].discountPercent = 40;
+  PRODUCTS = [];
+  renderHero(); renderFilterPanel();
+  apiService.fetchProducts = async () => snapshot.map(p => ({ ...p }));
+  await retryProducts();
+  out.afterRetry = { headline: headline(), chip: chip() };
+
+  apiService.fetchProducts = realFetch; apiService.updateProductStock = realStock;
+  apiService.getOrders = realOrders; apiService.getRestockRequests = realReqs;
+  apiService.getSaleNote = realNote;
+  PRODUCTS = await realFetch();
+  PRODUCTS.forEach((p, i) => { if (saved[i]) { p.discountPercent = saved[i].d; p.stock = saved[i].s; } });
+  closeAllSheets({ keepUrl: true });
+  renderHero(); renderFilterPanel(); lastGridSignature = null; renderGrid();
+  return out;
+}).catch(e => ({ error: e.message }));
+if (stale.error) console.log('stale-banner check unavailable:', String(stale.error).slice(0, 160));
+check(`buying the headline piece moves the banner to the next discount ("${stale.afterBuying}")`, stale.afterBuying === 'Up to 20% off selected pieces');
+check(`so does losing it from a stale bag ("${stale.afterStaleBag}")`, stale.afterStaleBag === 'Up to 20% off selected pieces');
+check('the owner selling out the only sale piece removes the banner', stale.afterOwnerSoldOut && stale.afterOwnerSoldOut.headline === '(no sale slide)');
+check('and the On Sale chip with it', stale.afterOwnerSoldOut && stale.afterOwnerSoldOut.chip === false);
+check(`a retry after a failed first load shows the sale banner ("${stale.afterRetry && stale.afterRetry.headline}")`, stale.afterRetry && stale.afterRetry.headline === 'Up to 40% off selected pieces');
+check('and the On Sale chip', stale.afterRetry && stale.afterRetry.chip === true);
+
+// A sale can end while a shopper is at checkout. place_order charges the
+// database's price, so without a re-check at the moment of ordering the button
+// could say AED 419 and the order be recorded at AED 599 — and a cash-on-
+// delivery customer would meet a courier asking for more than she agreed to.
+const priceGuard = await page.evaluate(async () => {
+  const saved = PRODUCTS.map(p => ({ d: p.discountPercent, s: p.stock }));
+  const realFetch = apiService.fetchProducts, realCreate = apiService.createOrder;
+  const piece = PRODUCTS.find(p => p.stock !== 'out');
+  PRODUCTS.forEach(p => { p.discountPercent = 0; });
+  let created = 0;
+  apiService.createOrder = async payload => {
+    created++;
+    return { id: 'DS-TEST', paymentMethod: 'cod', customer: payload.customer,
+             shippingAddress: payload.shippingAddress, subtotal: 1, shipping: 0, total: 1,
+             items: [{ productId: piece.id, name: piece.name, size: piece.sizes[0], qty: 1, total: 1 }] };
+  };
+  const fill = () => {
+    const set = (id, v) => { const el = document.getElementById(id); el.value = v; el.dispatchEvent(new Event('input', { bubbles: true })); };
+    set('coName', 'Test Shopper'); set('coEmail', 'shopper@example.com');
+    set('coPhone', '050 123 4567'); set('coAddress', 'Villa 14, Al Wasl Road');
+  };
+  const run = async (shownPct, serverPct) => {
+    created = 0;
+    piece.discountPercent = shownPct; piece.stock = 'in';
+    state.country = 'AE'; state.paymentMethod = 'cod';
+    state.bag = [{ productId: piece.id, size: piece.sizes[0] }];
+    renderCheckout(); openSheet('checkoutSheet'); fill();
+    const shownLabel = document.getElementById('coSubmit').textContent.trim();
+    apiService.fetchProducts = async () => PRODUCTS.map(p => p.id === piece.id ? { ...p, discountPercent: serverPct } : { ...p });
+    await placeOrder();
+    const after = document.getElementById('coSubmit');
+    return { created, shownLabel,
+             labelAfter: after ? after.textContent.trim() : '(checkout closed)',
+             nameKept: document.getElementById('coName') ? document.getElementById('coName').value : null,
+             toast: document.getElementById('toast').textContent };
+  };
+  const up = await run(30, 0);      // the sale ended: the price went up
+  const down = await run(0, 30);    // a sale started: the price went down
+
+  apiService.fetchProducts = realFetch; apiService.createOrder = realCreate;
+  PRODUCTS = await realFetch();
+  PRODUCTS.forEach((p, i) => { if (saved[i]) { p.discountPercent = saved[i].d; p.stock = saved[i].s; } });
+  state.bag = []; closeAllSheets({ keepUrl: true });
+  lastGridSignature = null; renderGrid(); refreshSale();
+  return { up, down, full: piece.price };
+}).catch(e => ({ error: e.message }));
+if (priceGuard.error) console.log('price guard unavailable:', String(priceGuard.error).slice(0, 160));
+const pu = priceGuard.up || {}, pd = priceGuard.down || {};
+check('an order is not placed when its price rose since it was shown', pu.created === 0);
+check(`the shopper is told why ("${pu.toast}")`, /price|changed/i.test(pu.toast || ''));
+check(`the button now shows the new total ("${pu.labelAfter}")`, (pu.labelAfter || '').includes(`AED ${priceGuard.full}`));
+check('and what they typed is kept', pu.nameKept === 'Test Shopper');
+check('an order whose price fell since it was shown goes through', pd.created === 1);
+
+// "Shop the sale" is the banner's one call to action. A shopper who already
+// has a category chosen, an availability chip on and something typed in the
+// search box must still land on exactly the sale pieces, not "No pieces match".
+const cta = await page.evaluate(() => {
+  const saved = PRODUCTS.map(p => ({ d: p.discountPercent, s: p.stock }));
+  PRODUCTS.forEach(p => { p.discountPercent = 0; });
+  const onSale = PRODUCTS.filter(p => p.stock !== 'out').slice(0, 2);
+  onSale.forEach(p => { p.discountPercent = 25; });
+  const otherCat = CATEGORIES.find(c => c !== 'All' && !onSale.some(p => p.cat === c)) || 'Accessories';
+  renderHero(); renderFilterPanel();
+  setCategory(otherCat);
+  state.filterAvail = new Set(['low']);
+  document.getElementById('searchInput').value = 'zzz-nothing-matches';
+  lastGridSignature = null; renderGrid();
+
+  shopTheSale();
+  const shown = [...document.querySelectorAll('.card .card-name')].map(n => n.textContent.trim());
+  const out = { shown, want: onSale.map(p => p.name),
+                category: state.category, avail: state.filterAvail.size,
+                search: document.getElementById('searchInput').value };
+
+  PRODUCTS.forEach((p, i) => { p.discountPercent = saved[i].d; p.stock = saved[i].s; });
+  state.saleOnly = false; state.filterAvail = new Set(); setCategory('All');
+  document.getElementById('searchInput').value = '';
+  lastGridSignature = null; renderGrid(); renderHero();
+  return out;
+}).catch(e => ({ error: e.message }));
+if (cta.error) console.log('shop-the-sale check unavailable:', String(cta.error).slice(0, 160));
+check(`"Shop the sale" lands on exactly the sale pieces despite other filters (${(cta.shown || []).length} shown)`,
+  Array.isArray(cta.shown) && cta.shown.length === cta.want.length && cta.want.every(n => cta.shown.includes(n)));
+check('it resets the category, availability chips and search', cta.category === 'All' && cta.avail === 0 && cta.search === '');
+
+// The hero must paint before any script runs. It used to be static HTML; if it
+// is built by JavaScript, the space above the grid is blank until the user and
+// product requests finish, then the hero pops in and shoves the grid down —
+// and the storefront's <h1> is missing from the HTML crawlers read, including
+// every /p/ page served from the same shell.
+const rawHome = await (await fetch(BASE + '/')).text();
+const track = /id="heroTrack"[^>]*>([\s\S]*?)<div class="hero-dots"/.exec(rawHome);
+check('the hero headline is in the served HTML', !!track && track[1].includes('Wrapped in softness'));
+check('as the page\'s <h1>', !!track && /<h1>Wrapped in softness/.test(track[1]));
+const firstPiecePath = await page.evaluate(() => productPath(PRODUCTS[0]));
+const rawProduct = await (await fetch(BASE + firstPiecePath)).text();
+check('and in the HTML served for a product page', /<h1>Wrapped in softness/.test(rawProduct));
+{
+  const noJs = await browser.newContext({ javaScriptEnabled: false });
+  const nj = await noJs.newPage();
+  await nj.goto(BASE + '/', { waitUntil: 'domcontentloaded' });
+  const box = await nj.locator('.hero-slide').first().boundingBox().catch(() => null);
+  check(`with JavaScript off, the hero is on screen (${box ? Math.round(box.height) + 'px tall' : 'absent'})`, !!box && box.height > 150);
+  await noJs.close();
+}
+
 // Rotation: a sale's two slides advance on their own for most visitors, and
 // never for someone who has asked their system to reduce motion.
 const rotation = async reducedMotion => {

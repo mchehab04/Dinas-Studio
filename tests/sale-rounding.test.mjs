@@ -11,9 +11,9 @@
 const check = (label, cond) => console.log((cond ? 'PASS  ' : 'FAIL  ') + label);
 
 // The formula as the spec states it: round(price × (100 − pct) / 100), half up,
-// to whole dirhams. Postgres round() on numeric rounds half away from zero,
+// to whole dirhams — applied only when there is a discount. Postgres round() on numeric rounds half away from zero,
 // which for the positive prices here is the same thing.
-const model = (price, pct) => Math.floor(price * (100 - pct) / 100 + 0.5);
+const model = (price, pct) => pct > 0 ? Math.floor(price * (100 - pct) / 100 + 0.5) : price;
 
 const PRICES = [199, 220, 259, 380, 399, 449, 459, 549, 588, 599, 659];
 const PERCENTS = [0, 5, 10, 15, 20, 25, 30, 33, 40, 50, 66, 75, 90];
@@ -28,6 +28,10 @@ check('599 at 50% is 300 (299.5 rounds up)', model(599, 50) === 300);
 check('659 at 50% is 330 (329.5 rounds up)', model(659, 50) === 330);
 check('every result is a whole dirham',
   PRICES.every(p => PERCENTS.every(c => Number.isInteger(model(p, c)))));
+// Rounding belongs to the discount. A piece listed at a non-whole price with no
+// discount is charged exactly what it shows — verify-place-order.sql check 2d
+// holds the database to the same rule.
+check('an undiscounted non-whole price is left as listed', model(199.5, 0) === 199.5);
 
 
 // --- the storefront's real implementation, pulled out of public/js/app.js

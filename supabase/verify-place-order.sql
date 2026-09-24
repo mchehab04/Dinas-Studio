@@ -104,6 +104,18 @@ begin
     case when v_ship = 25 then 'PASS ' else 'FAIL ' end, v_ship, v_sub;
   update public.products set "discountPercent" = 0 where id = v_id;
 
+  -- 2d. Rounding belongs to the discount, not to every price. A piece listed at
+  --     a non-whole price with no discount is charged exactly what it shows —
+  --     the storefront displays it unrounded, so rounding it here would charge
+  --     a different amount from the one on screen.
+  update public.products
+     set stock = 'in', "soldOut" = '[]', price = 199.5, "discountPercent" = 0
+   where id = v_id;
+  select t.subtotal into v_sub
+    from public.place_order('VERIFY-2d', '1 Jan 2026', v_cust, v_addr, 'cod', v_items) t;
+  raise notice '%  an undiscounted price is charged as listed: 199.5 charged %',
+    case when v_sub = 199.5 then 'PASS ' else 'FAIL ' end, v_sub;
+
   -- 3. That order marked the piece sold, so the next one must be refused.
   raise notice '%  the sale marked the piece sold out',
     case when (select stock from public.products where id = v_id) = 'out' then 'PASS ' else 'FAIL ' end;
