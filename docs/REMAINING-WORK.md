@@ -67,6 +67,18 @@ Deployed, sitemap resubmitted, and a shared link confirmed to preview the right 
 
 **The one thing still worth watching:** Search Console → Coverage, over the coming weeks. If the product pages come back indexed but thin, that is the signal to server-render the body text into the page — deliberately deferred until there is evidence it is needed, since Google renders JavaScript for a site this size.
 
+## Keeping the database awake
+
+Free Supabase projects are **paused after 7 days without activity**, and a paused database means the shop loads nothing until it is woken by hand. `.github/workflows/keep-supabase-awake.yml` runs one read a day to count as activity, and fails loudly (a GitHub notification) if the answer isn't 200.
+
+It queries Supabase **directly**, not through the site: `dinasstudio.com` serves cached static HTML from Cloudflare's edge, and the database call happens in the visitor's browser, which a pinger never runs.
+
+**Never automate an order for this.** Every order marks a one-of-a-kind piece sold out, emails a customer and spends real stock.
+
+The connection details are read out of `public/js/supabaseClient.js` at run time, so a rotated key only has to change in one place and there is no repository secret to keep in step.
+
+Note: GitHub disables scheduled workflows on a repository with no activity for 60 days. Pushing anything re-enables it.
+
 ## Remaining concerns after that
 
 | Item | Notes |
