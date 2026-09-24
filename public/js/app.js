@@ -210,6 +210,18 @@ const apiService = {
     if(error) { console.error(error); return false; }
     return true;
   },
+  // 0 clears the sale. Clamped here as well as refused by the editor, and the
+  // database's check constraint refuses anything outside 0-90 regardless.
+  async setProductDiscount(id, percent) {
+    const pct = Math.max(0, Math.min(90, Math.round(Number(percent) || 0)));
+    const { data, error } = await supabaseClient
+      .from('products').update({ discountPercent: pct }).eq('id', id).select().single();
+    if(error) { console.error(error); return null; }
+    const idx = PRODUCTS.findIndex(x => x.id === id);
+    if(idx !== -1) PRODUCTS[idx] = data;
+    storageService.saveProducts(PRODUCTS);
+    return data;
+  },
   async updateProductStock(id, stockStatus) {
     const existing = PRODUCTS.find(x => x.id === id);
     if(!existing) return null;
@@ -2032,6 +2044,11 @@ async function renderAdmin() {
         <span style="font-size:13px; color:var(--ink-soft);">Manage stock for <strong>${PRODUCTS.length} pieces</strong></span>
         <button class="primary-btn" style="font-size:11.5px; padding:6px 12px;" onclick="setAdminTab('add')">+ Add Piece</button>
       </div>
+      <div class="sale-note-row">
+        <input class="form-input" id="saleNoteInput" maxlength="60"
+               placeholder="Optional sale banner line, e.g. Ends Sunday" value="${escHtml(saleNoteText)}">
+        <button class="stock-toggle-btn" onclick="saveSaleNote()">Save note</button>
+      </div>
 
 
       <div class="inventory-list">
@@ -2048,11 +2065,12 @@ async function renderAdmin() {
                 <strong style="color:var(--primary);">${priceHtml(p)}</strong>
               </div>
             </div>
-            <div class="stock-btn-group">
+            <div class="stock-btn-group" id="invRow${p.id}">
               <button class="stock-toggle-btn ${p.stock==='in'?'active-in':''}" onclick="setProductStock(${p.id}, 'in')">In Stock</button>
               <button class="stock-toggle-btn ${p.stock==='low'?'active-low':''}" onclick="setProductStock(${p.id}, 'low')">Low</button>
               <button class="stock-toggle-btn ${p.stock==='out'?'active-out':''}" onclick="setProductStock(${p.id}, 'out')">Sold Out</button>
               <button class="stock-toggle-btn" onclick="openPhotoEditor(${p.id})">Photos (${(p.images||[]).length})</button>
+              <button class="stock-toggle-btn ${isOnSale(p) ? 'sale-set' : ''}" onclick="openSaleEditor(${p.id})">${isOnSale(p) ? `Sale ${discountOf(p)}%` : 'Sale'}</button>
               ${waiting.filter(r => r.product_id === p.id).length ? `
                 <button class="stock-toggle-btn waiting-btn" onclick="openWaitingList(${p.id})">
                   Waiting (${waiting.filter(r => r.product_id === p.id).length})
@@ -2215,6 +2233,86 @@ async function savePhotos(){
     showToast(e.message || 'Upload failed — please try again');
     if(btn) btn.disabled = false;
   }
+}
+
+// A whole number from 1 to 90. Clear is how a sale is ended, so 0 is not a
+// value the field accepts, and 12.5 is refused rather than quietly rounded.
+function validSalePct(v){
+  const t = String(v == null ? '' : v).trim();
+  return /^[0-9]+$/.test(t) && Number(t) >= 1 && Number(t) <= 90;
+}
+
+// The row's buttons are replaced in place rather than opening a sheet: the edit
+// happens where the owner is already looking. Save stays disabled until the
+// value is valid, as it does on every other form in the shop.
+function openSaleEditor(productId){
+  const p = PRODUCTS.find(x => x.id === productId);
+  const row = document.getElementById('invRow' + productId);
+  if(!p || !row) return;
+  row.innerHTML = `
+    <input class="form-input sale-input" id="salePct${productId}" type="text" inputmode="numeric"
+           value="${discountOf(p) || ''}" placeholder="% off" maxlength="2" aria-label="Percentage off">
+    <button class="stock-toggle-btn" id="saleSave${productId}" onclick="saveSaleEditor(${productId})">Save</button>
+    ${isOnSale(p) ? `<button class="stock-toggle-btn" onclick="clearSale(${productId})">Clear</button>` : ''}
+    <button class="stock-toggle-btn" onclick="renderAdmin()">Cancel</button>`;
+  const input = document.getElementById('salePct' + productId);
+  const save = document.getElementById('saleSave' + productId);
+  const refresh = () => {
+    const ok = validSalePct(input.value);
+    save.disabled = !ok;
+    input.classList.toggle('invalid', !ok && input.value.trim() !== '');
+  };
+  input.addEventListener('input', refresh);
+  input.addEventListener('keydown', e => {
+    if(e.key === 'Enter'){ e.preventDefault(); if(validSalePct(input.value)) saveSaleEditor(productId); }
+    if(e.key === 'Escape') renderAdmin();
+  });
+  refresh();
+  input.focus();
+}
+
+async function saveSaleEditor(productId){
+  const input = document.getElementById('salePct' + productId);
+  if(!input || !validSalePct(input.value)){
+    showToast('Enter a whole number between 1 and 90');
+    return;
+  }
+  const pct = Number(input.value.trim());
+  const updated = await apiService.setProductDiscount(productId, pct);
+  showToast(updated ? `"${updated.name}" is ${pct}% off ✓` : "Couldn't save that — please try again");
+  await afterSaleChange(productId);
+}
+
+async function clearSale(productId){
+  const updated = await apiService.setProductDiscount(productId, 0);
+  showToast(updated ? `Sale cleared on "${updated.name}"` : "Couldn't save that — please try again");
+  await afterSaleChange(productId);
+}
+
+// A discount moves prices on the grid, in the hero, in the filter's chip, in
+// any open product sheet and in the bag, so everything that shows a price is
+// refreshed from this one place rather than each caller remembering its own.
+async function afterSaleChange(productId){
+  await renderAdmin();
+  renderFilterPanel();
+  lastGridSignature = null;
+  renderGrid();
+  renderHero();
+  if(currentProduct && currentProduct.id === productId){
+    currentProduct = PRODUCTS.find(x => x.id === productId) || currentProduct;
+    renderProductDetail();
+  }
+  if(state.bag.length) renderBag();
+}
+
+async function saveSaleNote(){
+  const input = document.getElementById('saleNoteInput');
+  if(!input) return;
+  const text = input.value.trim();
+  const ok = await apiService.saveSaleNote(text);
+  if(ok) saleNoteText = text;   // the hero renders from this copy
+  showToast(ok ? (text ? 'Banner note saved ✓' : 'Banner note cleared') : "Couldn't save that — please try again");
+  renderHero();
 }
 
 async function setProductStock(productId, stockStatus) {

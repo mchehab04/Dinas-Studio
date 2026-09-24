@@ -1210,6 +1210,18 @@ button:disabled {
   color: var(--ink-soft);
   transition: all 0.15s ease;
 }
+/* Sale control: gold once set, so discounted pieces stand out in the list. */
+.stock-toggle-btn.sale-set{ border-color:var(--gold); color:var(--gold); font-weight:800; }
+.stock-toggle-btn:disabled{ opacity:.45; cursor:not-allowed; }
+.sale-input{ width:76px; padding:6px 10px; font-size:12.5px; }
+.sale-input.invalid{ border-color:var(--danger); }
+.sale-note-row{ display:flex; gap:8px; align-items:center; flex-wrap:wrap; margin-bottom:14px; }
+/* In the inventory's "Category • price" line the struck price stays inline:
+   as a block it broke the line and left the bullet dangling. It carries no
+   dollar figure, so it cannot run into the live price the way it did on cards. */
+.inventory-meta .sale-was{ display:inline; margin-right:6px; }
+.sale-note-row .form-input{ flex:1; min-width:180px; padding:8px 12px; font-size:12.5px; }
+
 .stock-toggle-btn.active-in {
   background: #E8F5E9;
   color: #2E7D32;

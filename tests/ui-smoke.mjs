@@ -589,6 +589,87 @@ const rotation = async reducedMotion => {
   await ctx.close();
   return running;
 };
+// Admin: the Sale button and its inline editor. supabaseClient.from is swapped
+// for a fake query builder, so the real setProductDiscount still runs — its
+// clamping and its PRODUCTS sync — without anything reaching the database.
+const saleAdmin = await page.evaluate(async () => {
+  const realFrom = supabaseClient.from;
+  const realOrders = apiService.getOrders, realReqs = apiService.getRestockRequests;
+  apiService.getOrders = async () => [];
+  apiService.getRestockRequests = async () => [];
+  const writes = [];
+  supabaseClient.from = table => {
+    const q = { v: null,
+      update(v){ this.v = v; return this; }, eq(){ return this; }, select(){ return this; },
+      single: async function(){
+        writes.push({ table, v: this.v });
+        const p = PRODUCTS.find(x => x.id === target.id);
+        return { data: { ...p, ...this.v }, error: null };
+      } };
+    return q;
+  };
+  const saved = PRODUCTS.map(p => ({ d: p.discountPercent, s: p.stock }));
+  PRODUCTS.forEach(p => { p.discountPercent = 0; });
+  const target = PRODUCTS.find(p => p.stock !== 'out');
+  const out = {};
+
+  adminTab = 'inventory';
+  await renderAdmin();
+  const btn = () => [...document.querySelectorAll(`#invRow${target.id} .stock-toggle-btn`)].find(b => /^Sale/.test(b.textContent.trim()));
+  out.buttonBefore = btn() && btn().textContent.trim();
+
+  openSaleEditor(target.id);
+  const input = document.getElementById('salePct' + target.id);
+  const save = [...document.querySelectorAll(`#invRow${target.id} button`)].find(b => b.textContent.trim() === 'Save');
+  const type = v => { input.value = v; input.dispatchEvent(new Event('input', { bubbles: true })); };
+  out.saveDisabledEmpty = save.disabled;
+  type('95');   out.saveDisabled95 = save.disabled;
+  type('12.5'); out.saveDisabledDecimal = save.disabled;
+  type('0');    out.saveDisabledZero = save.disabled;
+  type('30');   out.saveEnabled30 = !save.disabled;
+
+  // Put the piece in the bag first: clearing must not leave it at sale price.
+  state.bag = [{ productId: target.id, size: target.sizes[0] }];
+  await saveSaleEditor(target.id);
+  out.written = writes.at(-1) && writes.at(-1).v;
+  out.buttonAfter = btn() && btn().textContent.trim();
+  out.charged = chargedPrice(PRODUCTS.find(p => p.id === target.id));
+  renderBag();
+  out.bagDuringSale = document.getElementById('bagContent').innerHTML.includes('sale-was');
+
+  await clearSale(target.id);
+  out.cleared = writes.at(-1) && writes.at(-1).v;
+  out.buttonCleared = btn() && btn().textContent.trim();
+  out.bagAfterClear = document.getElementById('bagContent').innerHTML;
+  out.fullPrice = target.price;
+
+  // The clamp inside the real API method, independent of the editor's guard.
+  await apiService.setProductDiscount(target.id, 95);
+  out.clamped = writes.at(-1).v.discountPercent;
+
+  supabaseClient.from = realFrom;
+  apiService.getOrders = realOrders; apiService.getRestockRequests = realReqs;
+  PRODUCTS.forEach((p, i) => { p.discountPercent = saved[i].d; p.stock = saved[i].s; });
+  state.bag = [];
+  return out;
+}).catch(e => ({ error: e.message }));
+if (saleAdmin.error) console.log('saleAdmin sale editor unavailable:', String(saleAdmin.error).slice(0, 160));
+check(`the row offers a Sale button ("${saleAdmin.buttonBefore}")`, saleAdmin.buttonBefore === 'Sale');
+check('Save is disabled while the field is empty', saleAdmin.saveDisabledEmpty === true);
+check('and for 95%', saleAdmin.saveDisabled95 === true);
+check('and for a decimal', saleAdmin.saveDisabledDecimal === true);
+check('and for 0%', saleAdmin.saveDisabledZero === true);
+check('and enabled for 30%', saleAdmin.saveEnabled30 === true);
+check('saving writes 30 to the piece', saleAdmin.written && saleAdmin.written.discountPercent === 30);
+check(`the button then reads "${saleAdmin.buttonAfter}"`, saleAdmin.buttonAfter === 'Sale 30%');
+check('the piece is charged the discounted price', saleAdmin.charged === Math.round((saleAdmin.fullPrice || 0) * 0.7));
+check('a bag holding it shows the sale price', saleAdmin.bagDuringSale === true);
+check('clearing writes 0', saleAdmin.cleared && saleAdmin.cleared.discountPercent === 0);
+check('the button goes back to "Sale"', saleAdmin.buttonCleared === 'Sale');
+check('the bag drops the strikethrough', typeof saleAdmin.bagAfterClear === 'string' && !saleAdmin.bagAfterClear.includes('sale-was'));
+check('and shows the full price again', typeof saleAdmin.bagAfterClear === 'string' && saleAdmin.bagAfterClear.includes(`AED ${saleAdmin.fullPrice}`));
+check('the API itself clamps 95 to 90', saleAdmin.clamped === 90);
+
 check('a sale carousel advances on its own', await rotation(false) === true);
 check('but not for a visitor who asked to reduce motion', await rotation(true) === false);
 
