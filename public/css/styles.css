@@ -487,6 +487,7 @@
   .pd-desc{font-size:13.5px; color:var(--ink-soft); line-height:1.6; margin-top:10px;}
   .pd-label{font-size:12.5px; font-weight:800; color:var(--ink); margin-top:18px; letter-spacing:0.2px;}
   .size-row{display:flex; gap:8px; margin-top:10px; flex-wrap:wrap;}
+  .size-note{margin:8px 0 0; font-size:12.5px; color:var(--ink-soft);}
   .size-pill{
     display:inline-flex; align-items:center; justify-content:center;
     min-width:44px; min-height:44px; padding:9px 16px; border-radius:12px; border:1.5px solid var(--line); background:var(--surface);
@@ -1233,25 +1234,6 @@ button:disabled {
 .stock-toggle-btn.active-out {
   background: #FFEBEE;
   color: #C62828;
-}
-
-/* Palette swatches */
-.palette-swatches {
-  display: flex;
-  gap: 8px;
-  margin-top: 6px;
-}
-.palette-swatch {
-  width: 32px;
-  height: 32px;
-  border-radius: 50%;
-  cursor: pointer;
-  border: 2px solid transparent;
-  transition: transform 0.2s;
-}
-.palette-swatch.selected {
-  border-color: var(--ink);
-  transform: scale(1.15);
 }
 
 /* ===== Product Detail Spec List & Icons ===== */

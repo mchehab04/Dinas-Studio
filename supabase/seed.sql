@@ -1,5 +1,5 @@
 -- ============================================================
--- Seeds the `products` table from data/products.json.
+-- Seeds the `products` table with the original 17 pieces.
 -- Run once, after schema.sql, in the Supabase SQL Editor.
 -- ============================================================
 

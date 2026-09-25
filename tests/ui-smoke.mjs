@@ -887,6 +887,46 @@ check('the bag drops the strikethrough', typeof saleAdmin.bagAfterClear === 'str
 check('and shows the full price again', typeof saleAdmin.bagAfterClear === 'string' && saleAdmin.bagAfterClear.includes(`AED ${saleAdmin.fullPrice}`));
 check('the API itself clamps 95 to 90', saleAdmin.clamped === 90);
 
+// Housekeeping: the colour picker, the Accessories category and the made-up
+// popularity score for new pieces are gone; S-M / M-L are explained.
+const tidy = await page.evaluate(async () => {
+  const realOrders = apiService.getOrders, realReqs = apiService.getRestockRequests, realFrom = supabaseClient.from;
+  apiService.getOrders = async () => []; apiService.getRestockRequests = async () => [];
+  adminTab = 'add'; await renderAdmin();
+  const form = document.getElementById('adminContent');
+  const res = {
+    picker: /Color Theme/.test(form.innerText) || !!form.querySelector('.palette-swatch'),
+    adminCats: [...form.querySelectorAll('#npCat option')].map(o => o.value),
+    chips: [...document.querySelectorAll('#categoryRow .chip')].map(c => c.textContent.trim())
+  };
+  let inserted;
+  supabaseClient.from = () => ({ insert(v){ inserted = v; return this; }, select(){ return this; },
+    single: async () => ({ data: { id: -1, ...inserted }, error: null }) });
+  await apiService.addProduct({ name: 'x', cat: 'Kimonos', price: 100, stock: 'in', images: [] });
+  PRODUCTS.shift(); storageService.saveProducts(PRODUCTS);
+  supabaseClient.from = realFrom; apiService.getOrders = realOrders; apiService.getRestockRequests = realReqs;
+  res.insertedKeys = Object.keys(inserted || {});
+
+  const noteFor = p => { if(!p) return undefined; openProduct(p.id, false);
+    const n = document.querySelector('#pdSheet .size-note'); const t = n ? n.textContent.trim() : '';
+    closeAllSheets(); return t; };
+  res.smNote = noteFor(PRODUCTS.find(p => (p.sizes || []).includes('S-M')));
+  res.mlNote = noteFor(PRODUCTS.find(p => (p.sizes || []).includes('M-L')));
+  res.oneNote = noteFor(PRODUCTS.find(p => (p.sizes || []).includes('One Size')));
+  return res;
+}).catch(e => ({ error: e.message }));
+if (tidy.error) console.log('housekeeping checks unavailable:', String(tidy.error).slice(0, 160));
+check('the Add Item form has no colour picker', tidy.picker === false);
+check(`no Accessories in the shop filters (${(tidy.chips || []).join(', ')})`,
+  Array.isArray(tidy.chips) && !tidy.chips.includes('Accessories') && tidy.chips.includes('Abayas'));
+check('or in the Add Item category list', Array.isArray(tidy.adminCats) && !tidy.adminCats.includes('Accessories'));
+check(`a new piece is saved without a made-up popularity or colour (${(tidy.insertedKeys || []).join(',')})`,
+  Array.isArray(tidy.insertedKeys) && tidy.insertedKeys.includes('name') &&
+  !tidy.insertedKeys.includes('pop') && !tidy.insertedKeys.includes('paletteIndex'));
+check(`an S-M piece explains its fit ("${tidy.smNote}")`, /one size/i.test(tidy.smNote || '') && /\bS\b/.test(tidy.smNote) && /\bM\b/.test(tidy.smNote));
+check(`and an M-L piece ("${tidy.mlNote}")`, /one size/i.test(tidy.mlNote || '') && /\bL\b/.test(tidy.mlNote));
+check('a One Size piece gets no note', tidy.oneNote === '');
+
 check('a sale carousel advances on its own', await rotation(false) === true);
 check('but not for a visitor who asked to reduce motion', await rotation(true) === false);
 

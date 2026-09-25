@@ -1,5 +1,5 @@
 /* ========================= DATA & CONFIG ========================= */
-const CATEGORIES = ["All","Matching Sets","Abayas","Kimonos","Accessories"];
+const CATEGORIES = ["All","Matching Sets","Abayas","Kimonos"];
 
 const PALETTES = [
   ["#C55B54","#A63A3A"], ["#E89BA3","#D97C8B"], ["#CFA15C","#B4791C"],
@@ -250,8 +250,6 @@ const apiService = {
         soldOut: productData.stock === "out" ? ["One Size"] : [],
         desc: productData.desc || "Handcrafted with premium fabrics and finished with signature tailoring.",
         fabric: productData.fabric || "Premium Crepe / Silk Blend",
-        pop: 85,
-        paletteIndex: productData.paletteIndex,
         images: productData.images || [],
         nw: true
       })
@@ -385,12 +383,10 @@ let state = {
 
 let postAuthRedirect = null; // null | 'checkout' | 'admin' — set before sending someone to sign in
 
+// Only seen on a piece published without photos. The colour comes from the id
+// rather than a picker, so there is nothing to choose when adding a piece.
 function paletteFor(p){
-  if(typeof p === 'object' && p !== null) {
-    const idx = p.paletteIndex !== undefined ? p.paletteIndex : (p.id % PALETTES.length);
-    return PALETTES[idx % PALETTES.length];
-  }
-  return PALETTES[Number(p) % PALETTES.length];
+  return PALETTES[(Number(p && p.id) || 0) % PALETTES.length];
 }
 
 function gradientStyle(p){
@@ -534,6 +530,13 @@ function getFiltered(){
     case "new": list.sort((a,b)=>(b.nw===true)-(a.nw===true)); break;
   }
   return list;
+}
+
+// "S-M" and "M-L" are still one size for that piece — a cut that fits anyone
+// who usually wears either size.
+function sizeNote(s){
+  const m = /^(X*[SML])-(X*[SML])$/.exec(s || '');
+  return m ? `One size — fits anyone who usually wears ${m[1]} or ${m[2]}` : '';
 }
 
 function stockLabel(s){ return s==="in"?"In Stock":s==="low"?"Low Stock":"Sold Out"; }
@@ -776,7 +779,6 @@ function getProductFabric(p) {
     case "Matching Sets": return "Premium Soft Linen & Cotton Blend";
     case "Abayas": return "Lightweight Flowing Korean Crepe";
     case "Kimonos": return "Soft Silk-Satin with Subtle Sheen";
-    case "Accessories": return "Delicate Silk-Touch Chiffon";
     default: return "Premium Tailored Modest Fabric";
   }
 }
@@ -813,6 +815,7 @@ function renderProductDetail(){
           return `<button class="size-pill ${sel?'selected':''} ${sold?'soldout':''}" data-size="${s}" ${sold?'disabled':''} onclick="selectSize('${s}')">${s}${sold?' (Sold)':''}</button>`;
         }).join('')}
       </div>
+      ${sizeNote(currentSize) ? `<p class="size-note">${sizeNote(currentSize)}</p>` : ''}
 
       <div class="spec-list">
         <div class="spec-item">
@@ -1969,7 +1972,6 @@ function openPhotoEditor(productId){
   photoDraft = (photoEditProduct && photoEditProduct.images || []).map(url => ({ url }));
   setAdminTab('photos');
 }
-let newProductPaletteIndex = 0;
 
 async function openAdmin() {
   closeAllSheets();
@@ -2152,7 +2154,6 @@ async function renderAdmin() {
               <option value="Matching Sets">Matching Sets</option>
               <option value="Abayas">Abayas</option>
               <option value="Kimonos">Kimonos</option>
-              <option value="Accessories">Accessories</option>
             </select>
           </div>
           <div class="form-group">
@@ -2179,17 +2180,6 @@ async function renderAdmin() {
         <div class="form-group">
           <label class="form-label" for="npDesc">Description</label>
           <textarea class="form-input" id="npDesc" rows="2" style="resize:vertical;" placeholder="Flowing silhouette with soft gathered cuffs..."></textarea>
-        </div>
-
-        <div class="form-group">
-          <label class="form-label">Color Theme / Visual Gradient</label>
-          <div class="palette-swatches">
-            ${PALETTES.map(([a,b], idx) => `
-              <div class="palette-swatch ${newProductPaletteIndex===idx?'selected':''}" 
-                   style="background:linear-gradient(135deg, ${a}, ${b});" 
-                   onclick="selectPalette(${idx})"></div>
-            `).join('')}
-          </div>
         </div>
 
         <button class="primary-btn" id="npPublish" style="width:100%; margin-top:16px; padding:14px;" onclick="saveNewProduct()">
@@ -2255,11 +2245,6 @@ async function renderAdmin() {
 
     ${bodyContent}
   `;
-}
-
-function selectPalette(idx) {
-  newProductPaletteIndex = idx;
-  renderAdmin();
 }
 
 async function savePhotos(){
@@ -2421,8 +2406,7 @@ async function saveNewProduct() {
     stock,
     fabric,
     desc,
-    images,
-    paletteIndex: newProductPaletteIndex
+    images
   });
 
   if(!newP) {
