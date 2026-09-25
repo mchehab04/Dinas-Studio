@@ -10,6 +10,8 @@
 --   sale-pricing.sql            REQUIRED after place-order.sql — replaces it with
 --                               the version that charges discounts, and adds
 --                               shop_settings
+--   delivery-by-region.sql      REQUIRED after sale-pricing.sql — replaces it with
+--                               the version that prices delivery by area
 -- (order-paid-flag.sql is already folded into the orders table below.)
 -- ============================================================
 

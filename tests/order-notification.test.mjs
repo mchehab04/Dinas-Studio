@@ -111,7 +111,8 @@ await handler(new Request('https://x/', { method: 'POST', headers: { 'x-webhook-
 check('owner: sees what a discount gave away', ownerMail().html.includes('was AED 599.00') && ownerMail().html.includes('−30%'));
 check('owner: still sees the charged line total', ownerMail().html.includes('AED 419.00'));
 check('customer: is not shown the discount arithmetic', !customerMail().html.includes('was AED 599.00'));
-check('customer: sees what they paid', customerMail().html.includes('AED 419.00'));
+// The sample order is in Lebanon, so the customer sees dollars: 419 at the peg.
+check('customer: sees what they paid', customerMail().html.includes('$114.09'));
 
 // An order placed before discounts existed has no fullPrice at all.
 reset();
@@ -125,6 +126,26 @@ await handler(new Request('https://x/', { method: 'POST', headers: { 'x-webhook-
   body: JSON.stringify({ record: { ...ORDER,
     customer: { name: '<img src=x onerror=alert(1)> Smith', email: 'layla@example.com', phone: '+9613123456' } } }) }));
 check('customer: greeting escaped', customerMail().html.includes('&lt;img') && !customerMail().html.includes('<img'));
+
+// --- Lebanon customers see dollars only; the owner keeps dirhams
+reset();
+await handler(new Request('https://x/', { method: 'POST', headers: { 'x-webhook-secret': 's3cret' },
+  body: JSON.stringify({ record: { ...ORDER,
+    shippingAddress: { country: 'LB', region: 'Beirut', address: 'Hamra' },
+    items: [{ name: 'Silk Jacquard Set', size: 'One Size', qty: 1, total: 599 }],
+    subtotal: 599, shipping: 18.3625, total: 617.3625 } }) }));
+check('customer (LB): items and total in dollars', customerMail().html.includes('$163.10') && customerMail().html.includes('$168.10'));
+check('customer (LB): Beirut delivery is $5.00', customerMail().html.includes('$5.00'));
+check('customer (LB): no AED anywhere', !customerMail().html.includes('AED'));
+check('owner (LB): still in AED', ownerMail().html.includes('AED 599.00'));
+
+reset();
+await handler(new Request('https://x/', { method: 'POST', headers: { 'x-webhook-secret': 's3cret' },
+  body: JSON.stringify({ record: { ...ORDER,
+    shippingAddress: { country: 'LB', region: 'Other', address: 'Tripoli' },
+    subtotal: 991, shipping: 0, total: 991 } }) }));
+check('customer (LB Other): delivery arranged on WhatsApp', customerMail().html.includes('Arranged on WhatsApp') && !customerMail().html.includes('>Free<'));
+check('owner (LB Other): delivery arranged on WhatsApp', ownerMail().html.includes('Arranged on WhatsApp'));
 
 // --- COD gets a different next step
 reset();

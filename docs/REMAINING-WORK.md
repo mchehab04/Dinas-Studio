@@ -84,7 +84,7 @@ Note: GitHub disables scheduled workflows on a repository with no activity for 6
 [Spec](superpowers/specs/2026-09-24-sale-pricing-and-banner-design.md) · [Plan](superpowers/plans/2026-09-24-sale-pricing-and-banner.md). Per-piece discounts set from the admin inventory row, charged by `place_order`, and announced by a generated slide in the hero carousel.
 
 - **Data:** `products."discountPercent"` (0–90, 0 = not on sale) and a one-row `shop_settings` table holding the optional banner line.
-- **Charging:** `place_order` applies the discount when it reprices, rounding half up to whole dirhams, and records `fullPrice` and `discountPercent` on each line. Free delivery is judged on the discounted subtotal.
+- **Charging:** `place_order` applies the discount when it reprices, rounding half up to whole dirhams, and records `fullPrice` and `discountPercent` on each line. (Delivery is priced by area since delivery-by-region.sql; there is no free-delivery threshold.)
 - **Shop:** struck original (dirhams only) above the sale price, an On Sale filter, and a hero carousel whose sale slide quotes the largest discount among pieces still for sale. With no sale the hero is pixel-identical to before.
 - **Admin:** a `Sale` button per inventory row opens an inline editor; Save stays disabled until the value is a whole number 1–90.
 - **Elsewhere:** product-page JSON-LD and meta description, the restock email, and the owner's order email (which shows what each discount gave away) all use the sale price.

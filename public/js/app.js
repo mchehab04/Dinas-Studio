@@ -15,8 +15,9 @@ const COUNTRIES = {
     name: "United Arab Emirates",
     regionLabel: "Emirate",
     regions: ["Dubai","Abu Dhabi","Sharjah","Ajman","Ras Al Khaimah","Fujairah","Umm Al Quwain"],
-    shipping: 25,
-    freeOver: 350,
+    // Delivery by area; every emirate not named pays otherFee.
+    fees: { "Dubai": 25, "Sharjah": 40 },
+    otherFee: 50,
     delivery: "1–2 business days",
     cod: true,
     dial: "971",
@@ -27,9 +28,12 @@ const COUNTRIES = {
   LB: {
     name: "Lebanon",
     regionLabel: "Governorate",
-    regions: ["Beirut","Mount Lebanon","North","Akkar","Bekaa","Baalbek-Hermel","South","Nabatieh"],
-    shipping: 10.98,  // $2.99 at the peg
-    freeOver: 551,    // $150 at the peg
+    regions: ["Beirut","Mount Lebanon","Other"],
+    // $5 and $10, stored in dirhams like every amount. "Other" is agreed with
+    // the customer on WhatsApp, so otherFee is null: nothing charged here.
+    fees: { "Beirut": 5 * AED_PER_USD, "Mount Lebanon": 10 * AED_PER_USD },
+    otherFee: null,
+    usdOnly: true,    // Lebanon customers see dollars only
     delivery: "3–5 business days",
     cod: false,       // shipped from local stock, settled by Whish transfer
     dial: "961",
@@ -102,9 +106,26 @@ function priceHtml(p){
          `<span class="sale-tag">−${discountOf(p)}%</span>`;
 }
 
-function shippingFor(subtotal, countryCode){
+// Delivery by area, with no free-delivery threshold. Mirrors place_order in
+// supabase/delivery-by-region.sql, which is what actually charges it. null
+// means it is arranged on WhatsApp.
+function deliveryFee(countryCode, region){
   const c = countryOf(countryCode);
-  return subtotal >= c.freeOver ? 0 : c.shipping;
+  return Object.hasOwn(c.fees, region) ? c.fees[region] : c.otherFee;
+}
+// Lebanon is shown in dollars only; the UAE shows both.
+function priceIn(amount, countryCode){
+  return countryOf(countryCode).usdOnly ? `$${(amount / AED_PER_USD).toFixed(2)}` : formatPrice(amount);
+}
+function deliveryText(fee, countryCode){
+  return fee === null ? 'Arranged on WhatsApp' : priceIn(fee, countryCode);
+}
+// For a placed order. Nothing charged is either delivery agreed on WhatsApp or,
+// on an order from before delivery was priced by area, free delivery.
+function orderDeliveryText(order){
+  const a = order.shippingAddress || {};
+  if(Number(order.shipping) > 0) return priceIn(order.shipping, a.country);
+  return deliveryFee(a.country, a.region) === null ? 'Arranged on WhatsApp' : 'Free';
 }
 
 // Hollow by default; .active on the containing button fills it (see .wish-btn.active / .heart-toggle.active).
@@ -375,6 +396,7 @@ let state = {
   user: null,
   filterAvail: new Set(),
   saleOnly: false,
+  region: null,
   filtersOpen: false,
   tab: "shop",
   paymentMethod: "cod",
@@ -1024,15 +1046,11 @@ function renderBag(){
     `;
   }).join('');
 
-  const shipping = shippingFor(subtotal, state.country);
-  const total = subtotal + shipping;
-
+  // Delivery depends on the area, which is chosen at checkout.
   el.innerHTML = itemsHtml + `
     <div class="bag-summary">
-      <div class="sum-row"><span>Subtotal</span><span>${formatPrice(subtotal)}</span></div>
-      <div class="sum-row"><span>Delivery</span><span>${shipping===0?'Free':formatPrice(shipping)}</span></div>
-      ${shipping > 0 ? `<div style="font-size:11px; color:var(--ink-faint); margin-top:-6px; margin-bottom:6px;">Add ${formatPrice(countryOf(state.country).freeOver - subtotal)} more for free delivery</div>` : ''}
-      <div class="sum-row total"><span>Total</span><span>${formatPrice(total)}</span></div>
+      <div class="sum-row total"><span>Subtotal</span><span>${formatPrice(subtotal)}</span></div>
+      <div style="font-size:11px; color:var(--ink-faint); margin-top:-4px;">Delivery is added at checkout</div>
       <button class="primary-btn" style="width:100%; margin-top:14px;" onclick="openCheckout()">Proceed to Checkout</button>
     </div>
   `;
@@ -1064,9 +1082,6 @@ function setPaymentMethod(method) {
   });
 }
 
-// Country drives the region field, shipping and payment options at once, so the
-// whole form re-renders. Typed values are carried across rather than wiped —
-// the region resets deliberately, since last country's region is meaningless.
 // What the bag costs at current prices. The checkout button and the re-check in
 // placeOrder both read this, so they can't total the same bag differently.
 function bagTotals(){
@@ -1075,21 +1090,20 @@ function bagTotals(){
     const p = PRODUCTS.find(x => x.id === item.productId);
     if(p) subtotal += chargedPrice(p);
   });
-  const shipping = shippingFor(subtotal, state.country);
-  return { subtotal, shipping, total: subtotal + shipping };
+  const shipping = deliveryFee(state.country, state.region);
+  return { subtotal, shipping, total: subtotal + (shipping || 0) };
 }
 
-// Re-renders the checkout without losing what the customer has typed. A country
-// change resets the region on purpose (last country's region is meaningless);
-// anything else keeps it.
-function rerenderCheckout(keepRegion){
+// Re-renders the checkout without losing what the customer has typed. Country
+// and area both change the delivery price, so either one re-renders the form;
+// the area lives in state.region, and renderCheckout resets it when it doesn't
+// belong to the chosen country.
+function rerenderCheckout(){
   const typed = {};
   CHECKOUT_FIELDS.forEach(f => {
     const el = document.getElementById(f.id);
     if(el) typed[f.id] = el.value;
   });
-  const regionEl = document.getElementById('coRegion');
-  const region = keepRegion && regionEl ? regionEl.value : null;
 
   renderCheckout();
 
@@ -1098,21 +1112,27 @@ function rerenderCheckout(keepRegion){
     if(el && typed[f.id] !== undefined) el.value = typed[f.id];
     updateCharCount(f);
   });
-  if(region !== null){ const r = document.getElementById('coRegion'); if(r) r.value = region; }
   refreshSubmit('checkout');
+}
+
+function setRegion(region){
+  state.region = region;
+  rerenderCheckout();
 }
 
 function setCountry(code) {
   if(!COUNTRIES[code]) return;
   state.country = code;
   if(!COUNTRIES[code].cod && state.paymentMethod === 'cod') state.paymentMethod = 'transfer';
-  rerenderCheckout(false);
+  rerenderCheckout();
 }
 
 function renderCheckout() {
   const el = document.getElementById('checkoutContent');
-  const { subtotal, shipping, total } = bagTotals();
   const country = countryOf(state.country);
+  if(!country.regions.includes(state.region)) state.region = country.regions[0];
+  const { subtotal, shipping, total } = bagTotals();
+  const money = amount => priceIn(amount, state.country);
 
   const defaultName = state.user ? state.user.name : "";
   const defaultEmail = state.user ? state.user.email : "";
@@ -1122,7 +1142,7 @@ function renderCheckout() {
     <div class="checkout-section">
       <div style="background:var(--surface-alt); border:1px solid var(--line); border-radius:var(--radius-sm); padding:10px 14px; margin-bottom:18px; font-size:12.5px; color:var(--ink-soft); display:flex; justify-content:space-between; align-items:center;">
         <span>Ordering ${state.bag.length} ${state.bag.length === 1 ? 'piece' : 'pieces'}</span>
-        <strong style="color:var(--primary);">${formatPrice(total)}</strong>
+        <strong style="color:var(--primary);">${money(total)}</strong>
       </div>
 
       <h4 style="margin-top:0;">Contact Details</h4>
@@ -1154,8 +1174,8 @@ function renderCheckout() {
       </div>
       <div class="form-group">
         <label class="form-label" for="coRegion">${country.regionLabel} *</label>
-        <select class="form-select" id="coRegion">
-          ${country.regions.map(r => `<option value="${r}">${r}</option>`).join('')}
+        <select class="form-select" id="coRegion" onchange="setRegion(this.value)">
+          ${country.regions.map(r => `<option value="${r}" ${state.region===r?'selected':''}>${r}</option>`).join('')}
         </select>
       </div>
       <div class="form-group">
@@ -1184,13 +1204,13 @@ function renderCheckout() {
       </div>
 
       <div class="bag-summary" style="padding:14px; margin-top:16px; border:1px solid var(--line); border-radius:var(--radius-sm); background:var(--surface);">
-        <div class="sum-row"><span>Subtotal</span><span>${formatPrice(subtotal)}</span></div>
-        <div class="sum-row"><span>Delivery</span><span>${shipping===0?'Free':formatPrice(shipping)}</span></div>
-        <div class="sum-row total"><span>Total</span><span>${formatPrice(total)}</span></div>
+        <div class="sum-row"><span>Subtotal</span><span>${money(subtotal)}</span></div>
+        <div class="sum-row"><span>Delivery</span><span>${deliveryText(shipping, state.country)}</span></div>
+        <div class="sum-row total"><span>Total</span><span>${money(total)}</span></div>
       </div>
 
       <button class="primary-btn" id="coSubmit" style="width:100%; margin-top:16px; padding:15px;" onclick="placeOrder()" disabled>
-        Place Order (${formatPrice(total)})
+        Place Order (${money(total)})
       </button>
     </div>
   `;
@@ -1228,7 +1248,7 @@ async function placeOrder() {
     lastGridSignature = null;
     renderGrid();
     refreshSale();
-    rerenderCheckout(true);
+    rerenderCheckout();
     showToast("Prices have changed since you opened checkout — please check the new total");
     return;
   }
@@ -1361,9 +1381,13 @@ function renderOrderSuccess(order) {
           <span>Items Ordered:</span>
           <strong>${order.items.reduce((s,i)=>s+i.qty,0)} pcs</strong>
         </div>
+        <div class="order-detail-row">
+          <span>Delivery:</span>
+          <span>${orderDeliveryText(order)}</span>
+        </div>
         <div class="order-detail-row" style="font-size:15px; color:var(--primary); font-weight:800;">
           <span>Total:</span>
-          <span>${formatPrice(order.total)}</span>
+          <span>${priceIn(order.total, order.shippingAddress.country)}</span>
         </div>
       </div>
 
@@ -1695,7 +1719,7 @@ async function renderAccount(){
               </div>
               <div style="display:flex; justify-content:space-between; font-size:13px; font-weight:700; color:var(--primary);">
                 <span>Total</span>
-                <span>${formatPrice(o.total)}</span>
+                <span>${priceIn(o.total, o.shippingAddress && o.shippingAddress.country)}</span>
               </div>
             </div>
           `).join('')}

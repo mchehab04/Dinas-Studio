@@ -1,7 +1,8 @@
 -- ============================================================
 -- Checks place_order against real data, then throws everything away.
 --
--- Run after sale-pricing.sql: the discount case needs its column.
+-- Run after sale-pricing.sql and delivery-by-region.sql: the discount case
+-- needs its column, and the delivery checks the per-area rates.
 --
 -- Safe to run on the live database: every statement is inside one transaction
 -- that ends in ROLLBACK, so the test order and the sold-out flags it sets are
@@ -66,9 +67,8 @@ begin
     from public.place_order('VERIFY-2', '1 Jan 2026', v_cust, v_addr, 'cod', v_items) t;
   raise notice '%  priced from the table: subtotal % = product price %',
     case when v_sub = v_price then 'PASS ' else 'FAIL ' end, v_sub, v_price;
-  raise notice '%  shipping charged by the database: % (AE, %)',
-    case when v_ship = (case when v_price >= 350 then 0 else 25 end) then 'PASS ' else 'FAIL ' end,
-    v_ship, case when v_price >= 350 then 'free over 350' else 'under 350' end;
+  raise notice '%  shipping charged by the database: % (Dubai)',
+    case when v_ship = 25 then 'PASS ' else 'FAIL ' end, v_ship;
   raise notice '%  total = subtotal + shipping (%)',
     case when v_total = v_sub + v_ship then 'PASS ' else 'FAIL ' end, v_total;
 
@@ -89,10 +89,8 @@ begin
          then 'PASS ' else 'FAIL ' end, v_charged, v_full;
   update public.products set "discountPercent" = 0 where id = v_id;
 
-  -- 2c. Free delivery is judged on what the customer pays, not the full price.
-  --     Priced so the full price clears the AED 350 threshold and the
-  --     discounted one does not. 599 at 50% is 299.5, so this is also the case
-  --     that pins half-up rounding inside the database itself.
+  -- 2c. 599 at 50% is 299.5, so this is the case that pins half-up rounding
+  --     inside the database itself.
   update public.products
      set stock = 'in', "soldOut" = '[]', price = 599, "discountPercent" = 50
    where id = v_id;
@@ -100,9 +98,31 @@ begin
     from public.place_order('VERIFY-2c', '1 Jan 2026', v_cust, v_addr, 'cod', v_items) t;
   raise notice '%  the database rounds half up: 599 at 50%% charges %',
     case when v_sub = 300 then 'PASS ' else 'FAIL ' end, v_sub;
-  raise notice '%  delivery is judged on the discounted subtotal: % charged on %',
-    case when v_ship = 25 then 'PASS ' else 'FAIL ' end, v_ship, v_sub;
   update public.products set "discountPercent" = 0 where id = v_id;
+
+  -- 2e. Delivery is priced by area, with no free-delivery threshold: the
+  --     piece is priced far above the old AED 350 / $150 limits. Lebanon's
+  --     rates are dollars stored in dirhams at the 3.6725 peg; anywhere in
+  --     Lebanon outside Beirut and Mount Lebanon is agreed on WhatsApp, so
+  --     nothing is charged for it here.
+  declare
+    v_case record;
+  begin
+    for v_case in select * from (values
+        ('AE', 'Dubai', 25::numeric), ('AE', 'Sharjah', 40), ('AE', 'Abu Dhabi', 50),
+        ('AE', 'Fujairah', 50), ('LB', 'Beirut', 18.3625), ('LB', 'Mount Lebanon', 36.725),
+        ('LB', 'Other', 0), ('LB', 'North', 0)) t(country, region, fee)
+    loop
+      update public.products set stock = 'in', "soldOut" = '[]', price = 2000 where id = v_id;
+      select t.shipping, t.total into v_ship, v_total
+        from public.place_order('VERIFY-2e-' || v_case.region, '1 Jan 2026', v_cust,
+               jsonb_build_object('country', v_case.country, 'region', v_case.region, 'address', 'Verify'),
+               'transfer', v_items) t;
+      raise notice '%  delivery to % (%) is %: charged %',
+        case when v_ship = v_case.fee and v_total = 2000 + v_case.fee then 'PASS ' else 'FAIL ' end,
+        v_case.region, v_case.country, v_case.fee, v_ship;
+    end loop;
+  end;
 
   -- 2d. Rounding belongs to the discount, not to every price. A piece listed at
   --     a non-whole price with no discount is charged exactly what it shows —

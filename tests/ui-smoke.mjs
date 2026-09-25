@@ -693,9 +693,76 @@ if (priceGuard.error) console.log('price guard unavailable:', String(priceGuard.
 const pu = priceGuard.up || {}, pd = priceGuard.down || {};
 check('an order is not placed when its price rose since it was shown', pu.created === 0);
 check(`the shopper is told why ("${pu.toast}")`, /price|changed/i.test(pu.toast || ''));
-check(`the button now shows the new total ("${pu.labelAfter}")`, (pu.labelAfter || '').includes(`AED ${priceGuard.full}`));
+check(`the button now shows the new total ("${pu.labelAfter}")`, (pu.labelAfter || '').includes(`AED ${priceGuard.full + 25} `)); // + Dubai delivery
 check('and what they typed is kept', pu.nameKept === 'Test Shopper');
 check('an order whose price fell since it was shown goes through', pd.created === 1);
+
+// Delivery is priced by area, with no free-delivery threshold. Lebanon is
+// shown in dollars only; "Other" in Lebanon is agreed on WhatsApp.
+const delivery = await page.evaluate(async () => {
+  const piece = PRODUCTS.find(p => p.stock !== 'out');
+  const saved = { d: piece.discountPercent, price: piece.price, stock: piece.stock, soldOut: piece.soldOut };
+  piece.discountPercent = 0; piece.price = 1000;   // well above any old free-delivery threshold
+  state.bag = [{ productId: piece.id, size: piece.sizes[0] }];
+  state.country = 'AE'; state.paymentMethod = 'cod';
+  renderCheckout(); openSheet('checkoutSheet');
+  document.getElementById('coName').value = 'Kept Name';
+  const read = () => {
+    const rows = [...document.querySelectorAll('#checkoutContent .sum-row')]
+      .map(r => [...r.querySelectorAll('span')].map(s => s.textContent.trim()));
+    const get = k => (rows.find(r => r[0] === k) || [])[1];
+    return { delivery: get('Delivery'), total: get('Total'),
+             button: document.getElementById('coSubmit').textContent.trim(),
+             text: document.getElementById('checkoutContent').innerText,
+             regions: [...document.querySelectorAll('#coRegion option')].map(o => o.value) };
+  };
+  const pick = r => { const el = document.getElementById('coRegion'); el.value = r; el.dispatchEvent(new Event('change', { bubbles: true })); return read(); };
+  const out = { aeRegions: read().regions, dubai: pick('Dubai'), sharjah: pick('Sharjah'), abuDhabi: pick('Abu Dhabi'),
+                nameAfterRegion: document.getElementById('coName').value };
+  setCountry('LB');
+  out.lbRegions = read().regions;
+  out.beirut = pick('Beirut'); out.mount = pick('Mount Lebanon'); out.other = pick('Other');
+  let payload;
+  const realCreate = apiService.createOrder, realFetch = apiService.fetchProducts;
+  apiService.fetchProducts = async () => PRODUCTS.map(p => ({ ...p }));
+  apiService.createOrder = async p => { payload = p;
+    return { id: 'DS-TEST', paymentMethod: 'transfer', customer: p.customer, shippingAddress: p.shippingAddress,
+             subtotal: 1000, shipping: 0, total: 1000, items: [{ productId: piece.id, name: piece.name, size: piece.sizes[0], qty: 1, total: 1000 }] }; };
+  const set = (id, v) => { const el = document.getElementById(id); el.value = v; el.dispatchEvent(new Event('input', { bubbles: true })); };
+  set('coName', 'Test Shopper'); set('coEmail', 'shopper@example.com'); set('coPhone', '03 123 456'); set('coAddress', 'Hamra St');
+  await placeOrder();
+  out.sentRegion = payload && payload.shippingAddress.region;
+  out.confirmation = (document.getElementById('orderSuccessContent') || {}).innerText || '';
+  apiService.createOrder = realCreate; apiService.fetchProducts = realFetch;
+  piece.discountPercent = saved.d; piece.price = saved.price; piece.stock = saved.stock; piece.soldOut = saved.soldOut;
+  state.bag = []; state.country = 'AE'; closeAllSheets({ keepUrl: true });
+  lastGridSignature = null; renderGrid(); refreshSale();
+  return out;
+}).catch(e => ({ error: e.message }));
+if (delivery.error) console.log('delivery checks unavailable:', String(delivery.error).slice(0, 200));
+const dv = delivery;
+check(`UAE keeps every emirate (${(dv.aeRegions || []).length})`, (dv.aeRegions || []).length === 7 && !(dv.aeRegions || []).includes('Other'));
+check(`Dubai delivery is AED 25 even on a large order ("${dv.dubai && dv.dubai.delivery}")`, (dv.dubai && dv.dubai.delivery || '').startsWith('AED 25 '));
+check(`Sharjah is AED 40 ("${dv.sharjah && dv.sharjah.delivery}")`, (dv.sharjah && dv.sharjah.delivery || '').startsWith('AED 40 '));
+check(`the other emirates are AED 50 ("${dv.abuDhabi && dv.abuDhabi.delivery}")`, (dv.abuDhabi && dv.abuDhabi.delivery || '').startsWith('AED 50 '));
+check('UAE prices show both currencies', dv.abuDhabi && /AED 1050 · \$/.test(dv.abuDhabi.total || ''));
+check('changing the emirate keeps what was typed', dv.nameAfterRegion === 'Kept Name');
+check(`Lebanon offers Beirut, Mount Lebanon, Other (${(dv.lbRegions || []).join(', ')})`,
+  JSON.stringify(dv.lbRegions) === JSON.stringify(['Beirut', 'Mount Lebanon', 'Other']));
+check(`Beirut delivery is $5.00 ("${dv.beirut && dv.beirut.delivery}")`, dv.beirut && dv.beirut.delivery === '$5.00');
+check(`Mount Lebanon is $10.00 ("${dv.mount && dv.mount.delivery}")`, dv.mount && dv.mount.delivery === '$10.00');
+check(`Other is arranged on WhatsApp ("${dv.other && dv.other.delivery}")`, dv.other && dv.other.delivery === 'Arranged on WhatsApp');
+check(`and its total is the pieces alone ("${dv.other && dv.other.total}")`, dv.other && dv.other.total === '$272.29');
+check('Lebanon checkout shows no AED anywhere', !!dv.beirut && !/AED/.test(dv.beirut.text) && !/AED/.test(dv.other.text) && !/AED/.test(dv.other.button));
+check(`the order is sent with its area ("${dv.sentRegion}")`, dv.sentRegion === 'Other');
+check('the Lebanon confirmation is in dollars only', /\$272\.29/.test(dv.confirmation || '') && !/AED/.test(dv.confirmation || ''));
+check('and says delivery is arranged on WhatsApp', /Arranged on WhatsApp/.test(dv.confirmation || ''));
+check('the bag no longer promises free delivery', await page.evaluate(() => {
+  const piece = PRODUCTS.find(p => p.stock !== 'out');
+  state.bag = [{ productId: piece.id, size: piece.sizes[0] }]; renderBag();
+  const t = document.getElementById('bagContent').innerText; state.bag = []; renderBag();
+  return !/free delivery/i.test(t);
+}).catch(() => false));
 
 // "Shop the sale" is the banner's one call to action. A shopper who already
 // has a category chosen, an availability chip on and something typed in the
