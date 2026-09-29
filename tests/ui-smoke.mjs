@@ -1059,6 +1059,68 @@ check('and enabled once something is typed', descEdit.editedEnabled === true);
 check(`saving writes the new text ("${descEdit.written}")`, descEdit.written === 'A new <b>description</b>');
 check('and the shop shows it without a reload', descEdit.local === 'A new <b>description</b>');
 
+// "Write with AI" drafts a description through /api/describe and only fills
+// the box: nothing is saved until the admin presses Save.
+const aiDesc = await page.evaluate(async () => {
+  const realFetch = window.fetch, realSession = supabaseClient.auth.getSession;
+  const realOrders = apiService.getOrders, realReqs = apiService.getRestockRequests;
+  apiService.getOrders = async () => []; apiService.getRestockRequests = async () => [];
+  supabaseClient.auth.getSession = async () => ({ data: { session: { access_token: 'jwt-123' } } });
+  const sent = []; let reply = { status: 200, body: JSON.stringify({ text: 'A drafted description.' }) };
+  window.fetch = async (url, init) => {
+    if (String(url).endsWith('/api/describe')) { sent.push({ init, body: JSON.parse(init.body) }); return new Response(reply.body, { status: reply.status }); }
+    return realFetch(url, init);
+  };
+  const res = {};
+  try {
+    const target = PRODUCTS.find(p => (p.images || []).length > 0);
+    adminTab = 'inventory'; await renderAdmin();
+    openDescEditor(target.id);
+    const box = document.getElementById('descInput' + target.id);
+    const before = box.value;
+    await aiFillDesc(target.id);
+    res.filled = box.value;
+    res.saveEnabled = !document.getElementById('descSave' + target.id).disabled;
+    res.notSaved = PRODUCTS.find(p => p.id === target.id).desc === before;
+    const s = sent[0] || { body: {}, init: { headers: {} } };
+    res.auth = s.init.headers.Authorization;
+    res.name = s.body.name === target.name;
+    res.photoCount = (s.body.images || []).length;
+    res.expectPhotos = Math.min(3, target.images.length);
+    res.webp = (s.body.images || []).every(i => i.mimeType === 'image/webp' && i.data.length > 100);
+
+    reply = { status: 429, body: 'Gemini is busy or over its daily limit. Try again later.' };
+    box.value = 'kept'; await aiFillDesc(target.id);
+    res.keptOnError = box.value === 'kept';
+    res.errorToast = document.getElementById('toast').textContent;
+
+    // The Add Piece form, before any photo is added.
+    adminTab = 'add'; await renderAdmin();
+    sent.length = 0; reply = { status: 200, body: JSON.stringify({ text: 'A new piece, drafted.' }) };
+    await aiFillNewDesc();
+    res.noNameBlocked = sent.length === 0;
+    document.getElementById('npName').value = 'Test Abaya';
+    await aiFillNewDesc();
+    res.addFilled = document.getElementById('npDesc').value;
+    res.addSentName = sent[0] && sent[0].body.name;
+  } finally {
+    window.fetch = realFetch; supabaseClient.auth.getSession = realSession;
+    apiService.getOrders = realOrders; apiService.getRestockRequests = realReqs;
+    closeAllSheets({ keepUrl: true });
+  }
+  return res;
+}).catch(e => ({ error: e.message }));
+if (aiDesc.error) console.log('AI description checks unavailable:', String(aiDesc.error).slice(0, 200));
+check(`"Write with AI" fills the box ("${aiDesc.filled}")`, aiDesc.filled === 'A drafted description.');
+check('Save is ready but nothing is saved yet', aiDesc.saveEnabled === true && aiDesc.notSaved === true);
+check('the request carries the admin\'s session', aiDesc.auth === 'Bearer jwt-123');
+check('and the piece\'s name', aiDesc.name === true);
+check(`and its photos, shrunk to WebP (${aiDesc.photoCount} of ${aiDesc.expectPhotos})`, aiDesc.photoCount === aiDesc.expectPhotos && aiDesc.webp === true);
+check('an error leaves the text as it was', aiDesc.keptOnError === true);
+check(`and says why ("${aiDesc.errorToast}")`, /try again later/i.test(aiDesc.errorToast || ''));
+check('Add Piece asks for a name before drafting', aiDesc.noNameBlocked === true);
+check(`and then fills its description ("${aiDesc.addFilled}")`, aiDesc.addFilled === 'A new piece, drafted.' && aiDesc.addSentName === 'Test Abaya');
+
 check('a sale carousel advances on its own', await rotation(false) === true);
 check('but not for a visitor who asked to reduce motion', await rotation(true) === false);
 

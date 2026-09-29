@@ -2216,6 +2216,7 @@ async function renderAdmin() {
         <div class="form-group">
           <label class="form-label" for="npDesc">Description</label>
           <textarea class="form-input" id="npDesc" rows="2" style="resize:vertical;" placeholder="Flowing silhouette with soft gathered cuffs..."></textarea>
+          <button class="stock-toggle-btn ai-btn" id="npAi" style="margin-top:6px;" onclick="aiFillNewDesc()">Write with AI</button>
         </div>
 
         <button class="primary-btn" id="npPublish" style="width:100%; margin-top:16px; padding:14px;" onclick="saveNewProduct()">
@@ -2355,7 +2356,8 @@ function openDescEditor(productId){
     <textarea class="form-input desc-input" id="descInput${productId}" rows="4" maxlength="600"
               aria-label="Description">${escHtml(p.desc)}</textarea>
     <button class="stock-toggle-btn" id="descSave${productId}" onclick="saveDescEditor(${productId})">Save</button>
-    <button class="stock-toggle-btn" onclick="renderAdmin()">Cancel</button>`;
+    <button class="stock-toggle-btn" onclick="renderAdmin()">Cancel</button>
+    <button class="stock-toggle-btn ai-btn" id="descAi${productId}" onclick="aiFillDesc(${productId})">Write with AI</button>`;
   const box = document.getElementById('descInput' + productId);
   const save = document.getElementById('descSave' + productId);
   const refresh = () => { save.disabled = !box.value.trim(); };
@@ -2363,6 +2365,62 @@ function openDescEditor(productId){
   box.addEventListener('keydown', e => { if(e.key === 'Escape') renderAdmin(); });
   refresh();
   box.focus();
+}
+
+// Asks /api/describe (Gemini) for a draft from the piece's details and up to
+// three of its photos, shrunk first. Returns the text, or null after a toast
+// saying why not. It only drafts: the admin still reads, edits and saves.
+async function draftDescription({ name, cat, fabric, photos }){
+  if(!String(name || '').trim()){ showToast('Give the piece a name first'); return null; }
+  const { data } = await supabaseClient.auth.getSession();
+  const token = data && data.session && data.session.access_token;
+  if(!token){ showToast('Sign in again to use this'); return null; }
+  try {
+    const images = await Promise.all((photos || []).slice(0, 3).map(async src => {
+      const blob = src instanceof Blob ? src : await (await fetch(src)).blob();
+      return { mimeType: 'image/webp', data: await blobToBase64(await resizeToWebp(blob, 768, 0.8)) };
+    }));
+    const res = await fetch('/api/describe', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+      body: JSON.stringify({ name, cat, fabric, images })
+    });
+    if(!res.ok){
+      showToast(res.status === 500 ? 'AI descriptions are not set up yet' : (await res.text()) || 'Could not write a description');
+      return null;
+    }
+    return (await res.json()).text;
+  } catch(e){
+    console.error(e);
+    showToast('Could not write a description — please try again');
+    return null;
+  }
+}
+function blobToBase64(blob){
+  return new Promise((resolve, reject) => {
+    const r = new FileReader();
+    r.onload = () => resolve(String(r.result).split(',')[1]);
+    r.onerror = reject;
+    r.readAsDataURL(blob);
+  });
+}
+// Fills a box with a draft, with the button showing progress meanwhile.
+async function fillWithDraft(box, btn, details){
+  if(btn){ btn.disabled = true; btn.textContent = 'Writing…'; }
+  const text = await draftDescription(details);
+  if(btn){ btn.disabled = false; btn.textContent = 'Write with AI'; }
+  if(text && box && box.isConnected){ box.value = text; box.dispatchEvent(new Event('input')); }
+}
+function aiFillDesc(productId){
+  const p = PRODUCTS.find(x => x.id === productId);
+  if(!p) return;
+  return fillWithDraft(document.getElementById('descInput' + productId), document.getElementById('descAi' + productId),
+    { name: p.name, cat: p.cat, fabric: p.fabric || '', photos: p.images || [] });
+}
+function aiFillNewDesc(){
+  const val = id => ((document.getElementById(id) || {}).value || '').trim();
+  return fillWithDraft(document.getElementById('npDesc'), document.getElementById('npAi'),
+    { name: val('npName'), cat: val('npCat'), fabric: val('npFabric'), photos: photoDraft.map(i => i.file || i.url).filter(Boolean) });
 }
 
 async function saveDescEditor(productId){

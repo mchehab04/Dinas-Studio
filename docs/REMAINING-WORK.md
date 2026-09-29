@@ -97,6 +97,15 @@ Note: GitHub disables scheduled workflows on a repository with no activity for 6
 
 Either order is genuinely safe. Before the SQL, products have no `discountPercent` field, which reads as no discount, and the storefront doesn't request `shop_settings` at all — so there is no 404 in visitors' consoles.
 
+## AI descriptions (Gemini)
+
+"Write with AI" in the Description editor and on Add Piece calls `/api/describe` (`lib/describe.js`), which sends the piece's name, category, fabric and up to three shrunk photos to Gemini and returns a draft. It only fills the box; nothing is saved until Save.
+
+- **Setup:** a Gemini API key from Google AI Studio, added in Cloudflare Pages → Settings → Variables and Secrets as the secret `GEMINI_API_KEY`, then redeploy. Without it the button says "AI descriptions are not set up yet".
+- **Model:** `gemini-3.8-flash` (free tier). Set `GEMINI_MODEL` to change it without a code change.
+- **Access:** only the admin. The function checks the caller's Supabase session with `is_admin()` before calling Gemini.
+- **Free tier:** Google may use what is sent to improve its products; the photos are already public on the site.
+
 ## Remaining concerns after that
 
 | Item | Notes |
