@@ -349,7 +349,8 @@ check(`paths are no longer named by position (${photos.uploaded[0]})`,
 
 // Per-product URLs: the address bar has to follow what's on screen, and a
 // shared link has to open the right piece on its own.
-const first = await page.evaluate(() => ({ id: PRODUCTS[0].id, name: PRODUCTS[0].name, path: productPath(PRODUCTS[0]) }));
+// The first card in the grid, whatever the sort puts there.
+const first = await page.evaluate(() => { const p = getFiltered()[0]; return { id: p.id, name: p.name, path: productPath(p) }; });
 
 // The client builds these paths and the Function serving them builds its own;
 // they must agree, or every shared link takes a redirect on the way in.
@@ -993,6 +994,70 @@ check(`a new piece is saved without a made-up popularity or colour (${(tidy.inse
 check(`an S-M piece explains its fit ("${tidy.smNote}")`, /one size/i.test(tidy.smNote || '') && /\bS\b/.test(tidy.smNote) && /\bM\b/.test(tidy.smNote));
 check(`and an M-L piece ("${tidy.mlNote}")`, /one size/i.test(tidy.mlNote || '') && /\bL\b/.test(tidy.mlNote));
 check('a One Size piece gets no note', tidy.oneNote === '');
+
+// The availability chips are one choice at a time: In Stock, Notify Me or
+// On Sale. Picking one replaces the other; tapping the active one clears it.
+const oneFilter = await page.evaluate(() => {
+  const saved = PRODUCTS.map(p => p.discountPercent);
+  PRODUCTS.forEach(p => { p.discountPercent = 0; });
+  PRODUCTS.find(p => p.stock !== 'out').discountPercent = 20;
+  renderFilterPanel();
+  const active = () => [...document.querySelectorAll('#availRow .chip.active')].map(c => c.textContent.trim());
+  const res = {};
+  toggleAvail('in');   res.a = active();
+  toggleAvail('out');  res.b = active();
+  setSaleFilter(true); res.c = active();
+  toggleAvail('in');   res.d = active();
+  toggleAvail('in');   res.e = active();
+  PRODUCTS.forEach((p, i) => { p.discountPercent = saved[i]; });
+  state.filterAvail = new Set(); state.saleOnly = false;
+  renderFilterPanel(); lastGridSignature = null; renderGrid();
+  return res;
+}).catch(e => ({ error: e.message }));
+if (oneFilter.error) console.log('single-filter checks unavailable:', String(oneFilter.error).slice(0, 160));
+const same = (a, b) => JSON.stringify(a) === JSON.stringify(b);
+check(`In Stock alone (${oneFilter.a})`, same(oneFilter.a, ['In Stock']));
+check(`Notify Me replaces it (${oneFilter.b})`, same(oneFilter.b, ['Notify Me']));
+check(`On Sale replaces that (${oneFilter.c})`, same(oneFilter.c, ['On Sale']));
+check(`In Stock replaces On Sale (${oneFilter.d})`, same(oneFilter.d, ['In Stock']));
+check('tapping the active chip clears it', same(oneFilter.e, []));
+
+// A piece's description can be edited from its inventory row.
+const descEdit = await page.evaluate(async () => {
+  const realFrom = supabaseClient.from;
+  const realOrders = apiService.getOrders, realReqs = apiService.getRestockRequests;
+  apiService.getOrders = async () => []; apiService.getRestockRequests = async () => [];
+  const target = PRODUCTS[0];
+  const savedDesc = target.desc;
+  let written = null;
+  supabaseClient.from = () => ({ v: null,
+    update(v){ this.v = v; return this; }, eq(){ return this; }, select(){ return this; },
+    single: async function(){ written = this.v; return { data: { ...target, ...this.v }, error: null }; } });
+  adminTab = 'inventory'; await renderAdmin();
+  const res = { hasButton: !!document.querySelector(`#invRow${target.id} [onclick^="openDescEditor"]`) };
+  openDescEditor(target.id);
+  const box = document.getElementById('descInput' + target.id);
+  const save = document.getElementById('descSave' + target.id);
+  res.prefilled = box && box.value === savedDesc;
+  box.value = '   '; box.dispatchEvent(new Event('input'));
+  res.emptyDisabled = save.disabled;
+  box.value = 'A new <b>description</b>'; box.dispatchEvent(new Event('input'));
+  res.editedEnabled = !save.disabled;
+  await saveDescEditor(target.id);
+  res.written = written && written.desc;
+  res.local = (PRODUCTS.find(p => p.id === target.id) || {}).desc;
+  supabaseClient.from = realFrom; apiService.getOrders = realOrders; apiService.getRestockRequests = realReqs;
+  PRODUCTS.find(p => p.id === target.id).desc = savedDesc;
+  closeAllSheets({ keepUrl: true });
+  return res;
+}).catch(e => ({ error: e.message }));
+if (descEdit.error) console.log('description editor unavailable:', String(descEdit.error).slice(0, 160));
+check('each inventory row has a Description button', descEdit.hasButton === true);
+check('the editor opens with the current description', descEdit.prefilled === true);
+check('Save is disabled for a blank description', descEdit.emptyDisabled === true);
+check('and enabled once something is typed', descEdit.editedEnabled === true);
+check(`saving writes the new text ("${descEdit.written}")`, descEdit.written === 'A new <b>description</b>');
+check('and the shop shows it without a reload', descEdit.local === 'A new <b>description</b>');
 
 check('a sale carousel advances on its own', await rotation(false) === true);
 check('but not for a visitor who asked to reduce motion', await rotation(true) === false);

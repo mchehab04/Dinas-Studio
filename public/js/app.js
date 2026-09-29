@@ -233,6 +233,15 @@ const apiService = {
   },
   // 0 clears the sale. Clamped here as well as refused by the editor, and the
   // database's check constraint refuses anything outside 0-90 regardless.
+  async updateProductDesc(id, desc) {
+    const { data, error } = await supabaseClient
+      .from('products').update({ desc }).eq('id', id).select().single();
+    if(error) { console.error(error); return null; }
+    const idx = PRODUCTS.findIndex(x => x.id === id);
+    if(idx !== -1) PRODUCTS[idx] = data;
+    storageService.saveProducts(PRODUCTS);
+    return data;
+  },
   async setProductDiscount(id, percent) {
     const pct = Math.max(0, Math.min(90, Math.round(Number(percent) || 0)));
     const { data, error } = await supabaseClient
@@ -486,16 +495,17 @@ function setCategory(c){
   document.getElementById('shopTitle').textContent = c === "All" ? "Shop All" : "Shop " + c;
   renderFilterPanel(); renderGrid();
 }
+// In Stock, Notify Me and On Sale are one choice: picking one replaces the
+// others, and tapping the active one clears it.
 function toggleAvail(k){
-  state.filterAvail.has(k) ? state.filterAvail.delete(k) : state.filterAvail.add(k);
-  renderFilterPanel(); renderGrid();
+  state.filterAvail = state.filterAvail.has(k) ? new Set() : new Set([k]);
+  state.saleOnly = false;
+  renderFilterPanel(); lastGridSignature = null; renderGrid();
 }
 // The banner buttons: "Shop the sale" (sale=true) lands on exactly the sale
 // pieces, "Shop the collection" on every piece. Either way the shopper's earlier
 // filters are cleared — a category, an availability chip or leftover search
-// text would otherwise land them on "No pieces match". Cleared here rather than
-// in setSaleFilter, so the On Sale chip still combines with other filters the
-// way every other chip does.
+// text would otherwise land them on "No pieces match".
 function shopFromHero(sale){
   state.filterAvail = new Set();
   const search = document.getElementById('searchInput');
@@ -507,6 +517,7 @@ function shopFromHero(sale){
 
 function setSaleFilter(on){
   state.saleOnly = !!on;
+  if(state.saleOnly) state.filterAvail = new Set();
   renderFilterPanel();
   lastGridSignature = null;
   renderGrid();
@@ -827,7 +838,7 @@ function renderProductDetail(){
       <span class="pd-cat">${p.cat}</span>
       <h2 class="pd-title">${p.name}</h2>
       <div class="pd-price">${priceHtml(p)}</div>
-      <p class="pd-desc">${p.desc}</p>
+      <p class="pd-desc">${escHtml(p.desc)}</p>
 
       <div class="pd-section-label">Size</div>
       <div class="size-row">
@@ -2149,6 +2160,7 @@ async function renderAdmin() {
               <button class="stock-toggle-btn ${p.stock==='low'?'active-low':''}" onclick="setProductStock(${p.id}, 'low')">Low</button>
               <button class="stock-toggle-btn ${p.stock==='out'?'active-out':''}" onclick="setProductStock(${p.id}, 'out')">Sold Out</button>
               <button class="stock-toggle-btn" onclick="openPhotoEditor(${p.id})">Photos (${(p.images||[]).length})</button>
+              <button class="stock-toggle-btn" onclick="openDescEditor(${p.id})">Description</button>
               <button class="stock-toggle-btn ${isOnSale(p) ? 'sale-set' : ''}" onclick="openSaleEditor(${p.id})">${isOnSale(p) ? `Sale ${discountOf(p)}%` : 'Sale'}</button>
               ${waiting.filter(r => r.product_id === p.id).length ? `
                 <button class="stock-toggle-btn waiting-btn" onclick="openWaitingList(${p.id})">
@@ -2331,6 +2343,35 @@ function openSaleEditor(productId){
   });
   refresh();
   input.focus();
+}
+
+// Opens in the row's button area, like the sale editor. Save stays disabled
+// while the text is blank.
+function openDescEditor(productId){
+  const p = PRODUCTS.find(x => x.id === productId);
+  const row = document.getElementById('invRow' + productId);
+  if(!p || !row) return;
+  row.innerHTML = `
+    <textarea class="form-input desc-input" id="descInput${productId}" rows="4" maxlength="600"
+              aria-label="Description">${escHtml(p.desc)}</textarea>
+    <button class="stock-toggle-btn" id="descSave${productId}" onclick="saveDescEditor(${productId})">Save</button>
+    <button class="stock-toggle-btn" onclick="renderAdmin()">Cancel</button>`;
+  const box = document.getElementById('descInput' + productId);
+  const save = document.getElementById('descSave' + productId);
+  const refresh = () => { save.disabled = !box.value.trim(); };
+  box.addEventListener('input', refresh);
+  box.addEventListener('keydown', e => { if(e.key === 'Escape') renderAdmin(); });
+  refresh();
+  box.focus();
+}
+
+async function saveDescEditor(productId){
+  const box = document.getElementById('descInput' + productId);
+  const desc = box ? box.value.trim() : '';
+  if(!desc){ showToast('Enter a description'); return; }
+  const updated = await apiService.updateProductDesc(productId, desc);
+  showToast(updated ? `Description saved for "${updated.name}" ✓` : "Couldn't save that — please try again");
+  await afterSaleChange(productId);
 }
 
 async function saveSaleEditor(productId){
