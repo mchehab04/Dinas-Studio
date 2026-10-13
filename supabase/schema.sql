@@ -12,6 +12,8 @@
 --                               shop_settings
 --   delivery-by-region.sql      REQUIRED after sale-pricing.sql — replaces it with
 --                               the version that prices delivery by area
+--   banner-settings.sql         after sale-pricing.sql — banner text, photo and
+--                               sale headline columns on shop_settings
 -- (order-paid-flag.sql is already folded into the orders table below.)
 -- ============================================================
 
