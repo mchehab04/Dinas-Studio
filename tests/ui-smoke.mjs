@@ -203,9 +203,10 @@ const adminWaiting = await page.evaluate(async () => {
     byHand: el.querySelectorAll('.waiting-tag').length,
     markButtons: [...el.querySelectorAll('button')].filter(b => /Mark contacted/.test(b.textContent)).length
   };
-  adminTab = 'inventory';
+  adminTab = 'inventory'; invOpenId = p.id;
   await renderAdmin();
   res.inventoryText = document.getElementById('adminContent').innerText;
+  invOpenId = null;
   apiService.getOrders = realOrders;
   apiService.getRestockRequests = realReqs;
   return res;
@@ -898,7 +899,7 @@ const saleAdmin = await page.evaluate(async () => {
   const target = PRODUCTS.find(p => p.stock !== 'out');
   const out = {};
 
-  adminTab = 'inventory';
+  adminTab = 'inventory'; invOpenId = target.id;
   await renderAdmin();
   const btn = () => [...document.querySelectorAll(`#invRow${target.id} .stock-toggle-btn`)].find(b => /^Sale/.test(b.textContent.trim()));
   out.buttonBefore = btn() && btn().textContent.trim();
@@ -1037,7 +1038,7 @@ const details = await page.evaluate(async () => {
     single: async function(){ writes++; written = this.v; return { data: { ...PRODUCTS.find(p => p.id === target.id), ...this.v }, error: null }; } });
   const res = {};
   try {
-    adminTab = 'inventory'; await renderAdmin();
+    adminTab = 'inventory'; invOpenId = target.id; await renderAdmin();
     const row = () => document.getElementById('invRow' + target.id);
     const labels = [...row().querySelectorAll('button')].map(b => b.textContent.trim());
     res.hasEdit = labels.includes('Edit details');
@@ -1106,7 +1107,7 @@ const aiDesc = await page.evaluate(async () => {
   const res = {};
   try {
     const target = PRODUCTS.find(p => (p.images || []).length > 0);
-    adminTab = 'inventory'; await renderAdmin();
+    adminTab = 'inventory'; invOpenId = target.id; await renderAdmin();
     openDetailsEditor(target.id);
     const box = document.getElementById('editDesc' + target.id);
     const before = box.value;
@@ -1172,6 +1173,47 @@ check(`an HTML error page is not shown as code ("${aiDesc.htmlToast}")`, !!aiDes
 check('a photo that won\'t load is skipped, not fatal', aiDesc.skippedBroken === true);
 check('Add Piece asks for a name before drafting', aiDesc.noNameBlocked === true);
 check(`and then fills its description ("${aiDesc.addFilled}")`, aiDesc.addFilled === 'A new piece, drafted.' && aiDesc.addSentName === 'Test Abaya');
+
+// Inventory is a grid of tiles (name, category, price). Tapping one opens that
+// piece with its controls; "All pieces" goes back.
+const grid = await page.evaluate(async () => {
+  const realOrders = apiService.getOrders, realReqs = apiService.getRestockRequests, realStock = apiService.updateProductStock;
+  apiService.getOrders = async () => []; apiService.getRestockRequests = async () => [];
+  const res = {};
+  try {
+    invOpenId = null; adminTab = 'inventory'; await renderAdmin();
+    const c = document.getElementById('adminContent');
+    const tiles = () => [...c.querySelectorAll('.inv-tile')];
+    res.tiles = tiles().length; res.total = PRODUCTS.length;
+    res.noControls = !c.querySelector('[id^="invRow"]');
+    const p = PRODUCTS[1];
+    const text = tiles()[1].innerText;
+    res.tileHasAll = text.includes(p.name) && text.includes(p.cat) && text.includes('AED ' + chargedPrice(p));
+    tiles()[1].click();
+    await new Promise(r => setTimeout(r, 300));
+    res.opened = !!document.getElementById('invRow' + p.id);
+    res.onlyOne = c.querySelectorAll('[id^="invRow"]').length === 1;
+    res.hasBack = !!c.querySelector('.inv-back');
+    apiService.updateProductStock = async (id, st) => PRODUCTS.find(x => x.id === id);
+    await setProductStock(p.id, p.stock);
+    res.staysOpen = !!document.getElementById('invRow' + p.id);
+    c.querySelector('.inv-back').click();
+    await new Promise(r => setTimeout(r, 300));
+    res.backToGrid = tiles().length === PRODUCTS.length && !c.querySelector('[id^="invRow"]');
+  } finally {
+    apiService.getOrders = realOrders; apiService.getRestockRequests = realReqs; apiService.updateProductStock = realStock;
+    invOpenId = null; closeAllSheets({ keepUrl: true });
+  }
+  return res;
+}).catch(e => ({ error: e.message }));
+if (grid.error) console.log('inventory grid checks unavailable:', String(grid.error).slice(0, 200));
+check(`inventory shows a tile per piece (${grid.tiles} of ${grid.total})`, grid.tiles === grid.total && grid.total > 0);
+check('with no controls until a piece is opened', grid.noControls === true);
+check('each tile shows name, category and price', grid.tileHasAll === true);
+check('tapping a tile opens that piece alone, with its controls', grid.opened === true && grid.onlyOne === true);
+check('and a way back to all pieces', grid.hasBack === true);
+check('a change keeps the piece open', grid.staysOpen === true);
+check('"All pieces" returns to the grid', grid.backToGrid === true);
 
 check('a sale carousel advances on its own', await rotation(false) === true);
 check('but not for a visitor who asked to reduce motion', await rotation(true) === false);

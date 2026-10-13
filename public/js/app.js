@@ -2130,6 +2130,7 @@ async function renderAdmin() {
       `}
     `;
   } else if(adminTab === 'inventory') {
+    const openPiece = PRODUCTS.find(p => p.id === invOpenId);
     bodyContent = `
       <div style="display:flex; justify-content:space-between; align-items:center; gap:10px; flex-wrap:wrap; margin-bottom:14px;">
         <span style="font-size:13px; color:var(--ink-soft);">Manage stock for <strong>${PRODUCTS.length} pieces</strong></span>
@@ -2142,35 +2143,17 @@ async function renderAdmin() {
       </div>
 
 
-      <div class="inventory-list">
-        ${PRODUCTS.map(p => `
-          <div class="inventory-item">
-            <div class="inventory-thumb" style="${productThumbStyle(p)}">
-              ${productMedia(p)}
-            </div>
-            <div class="inventory-info">
-              <span class="inventory-name">${p.name}</span>
-              <div class="inventory-meta">
-                <span>${p.cat}</span>
-                <span>•</span>
-                <strong style="color:var(--primary);">${priceHtml(p)}</strong>
-              </div>
-            </div>
-            <div class="stock-btn-group" id="invRow${p.id}">
-              <button class="stock-toggle-btn ${p.stock==='in'?'active-in':''}" onclick="setProductStock(${p.id}, 'in')">In Stock</button>
-              <button class="stock-toggle-btn ${p.stock==='low'?'active-low':''}" onclick="setProductStock(${p.id}, 'low')">Low</button>
-              <button class="stock-toggle-btn ${p.stock==='out'?'active-out':''}" onclick="setProductStock(${p.id}, 'out')">Sold Out</button>
-              <button class="stock-toggle-btn" onclick="openPhotoEditor(${p.id})">Photos (${(p.images||[]).length})</button>
-              <button class="stock-toggle-btn" onclick="openDetailsEditor(${p.id})">Edit details</button>
-              <button class="stock-toggle-btn ${isOnSale(p) ? 'sale-set' : ''}" onclick="openSaleEditor(${p.id})">${isOnSale(p) ? `Sale ${discountOf(p)}%` : 'Sale'}</button>
-              ${waiting.filter(r => r.product_id === p.id).length ? `
-                <button class="stock-toggle-btn waiting-btn" onclick="openWaitingList(${p.id})">
-                  Waiting (${waiting.filter(r => r.product_id === p.id).length})
-                </button>` : ''}
-            </div>
-          </div>
-        `).join('')}
-      </div>
+      ${openPiece ? `
+        <button class="sort-btn inv-back" onclick="closeInventoryItem()">← All pieces</button>
+        <div class="inventory-list">${inventoryItemHtml(openPiece, waiting)}</div>` : `
+        <div class="inventory-grid">
+          ${PRODUCTS.map(p => `
+            <button class="inv-tile" onclick="openInventoryItem(${p.id})">
+              <span class="inv-tile-name">${escHtml(p.name)}</span>
+              <span class="inv-tile-cat">${escHtml(p.cat)}</span>
+              <span class="inv-tile-price">${priceHtml(p)}</span>
+            </button>`).join('')}
+        </div>`}
     `;
   } else if(adminTab === 'add') {
     bodyContent = `
@@ -2353,6 +2336,51 @@ function validPrice(v){
   const t = String(v).trim();
   return /^[0-9]{1,5}(\.[0-9]{1,2})?$/.test(t) && Number(t) > 0;
 }
+// One piece's controls in the inventory: stock, photos, details, sale and
+// its waiting list. Shown once its tile is opened.
+function inventoryItemHtml(p, waiting){
+  return `
+    <div class="inventory-item">
+      <div class="inventory-thumb" style="${productThumbStyle(p)}">
+        ${productMedia(p)}
+      </div>
+      <div class="inventory-info">
+        <span class="inventory-name">${p.name}</span>
+        <div class="inventory-meta">
+          <span>${p.cat}</span>
+          <span>•</span>
+          <strong style="color:var(--primary);">${priceHtml(p)}</strong>
+        </div>
+      </div>
+      <div class="stock-btn-group" id="invRow${p.id}">
+        <button class="stock-toggle-btn ${p.stock==='in'?'active-in':''}" onclick="setProductStock(${p.id}, 'in')">In Stock</button>
+        <button class="stock-toggle-btn ${p.stock==='low'?'active-low':''}" onclick="setProductStock(${p.id}, 'low')">Low</button>
+        <button class="stock-toggle-btn ${p.stock==='out'?'active-out':''}" onclick="setProductStock(${p.id}, 'out')">Sold Out</button>
+        <button class="stock-toggle-btn" onclick="openPhotoEditor(${p.id})">Photos (${(p.images||[]).length})</button>
+        <button class="stock-toggle-btn" onclick="openDetailsEditor(${p.id})">Edit details</button>
+        <button class="stock-toggle-btn ${isOnSale(p) ? 'sale-set' : ''}" onclick="openSaleEditor(${p.id})">${isOnSale(p) ? `Sale ${discountOf(p)}%` : 'Sale'}</button>
+        ${waiting.filter(r => r.product_id === p.id).length ? `
+          <button class="stock-toggle-btn waiting-btn" onclick="openWaitingList(${p.id})">
+            Waiting (${waiting.filter(r => r.product_id === p.id).length})
+          </button>` : ''}
+      </div>
+    </div>`;
+}
+
+// Inventory is a grid of tiles; this is the piece opened from it, or null.
+// It survives a re-render, so a stock or sale change keeps the piece open.
+let invOpenId = null;
+async function openInventoryItem(id){
+  invOpenId = id;
+  await renderAdmin();
+  const c = document.getElementById('adminContent');
+  if(c) c.scrollIntoView({ block: 'start' });
+}
+async function closeInventoryItem(){
+  invOpenId = null;
+  await renderAdmin();
+}
+
 // Every piece's details in one form, opened in its inventory row: name,
 // category, price, fabric and description, saved together. Save stays
 // disabled until each is valid. The category list is the shop's own, so a

@@ -1169,6 +1169,15 @@ button:disabled {
   width: 20px;
   height: 20px;
 }
+/* Inventory grid: one small tile per piece; tapping opens its controls. */
+.inventory-grid{ display:grid; grid-template-columns:repeat(auto-fill, minmax(150px, 1fr)); gap:8px; }
+.inv-tile{ display:flex; flex-direction:column; align-items:flex-start; gap:3px; text-align:left; padding:10px 12px; background:var(--surface); border:1px solid var(--line); border-radius:var(--radius-md); cursor:pointer; font:inherit; color:var(--ink); }
+.inv-tile:hover, .inv-tile:focus-visible{ border-color:var(--primary); }
+.inv-tile-name{ font-size:13px; font-weight:700; line-height:1.3; }
+.inv-tile-cat{ font-size:11.5px; color:var(--ink-soft); }
+.inv-tile-price{ font-size:12px; font-weight:700; color:var(--primary); }
+.inv-tile-price .sale-was{ display:inline; margin-right:4px; }
+.inv-back{ margin-bottom:10px; }
 .inventory-info {
   flex: 1 1 140px;
   min-width: 0;

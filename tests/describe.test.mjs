@@ -12,6 +12,7 @@ let isAdmin = true;
 let geminiReply = { candidates: [{ content: { parts: [{ text: '  "A relaxed silk set with a soft drape."  ' }] } }] };
 let geminiStatus = 200;
 let calls = [];
+let busy = new Set();   // models answering 503 "high demand"
 
 globalThis.fetch = async (url, init = {}) => {
   const u = String(url);
@@ -22,12 +23,14 @@ globalThis.fetch = async (url, init = {}) => {
     { desc: 'A flowing powder-blue kimono with gold trim.' }
   ]), { status: 200 });
   if (u.includes('generativelanguage.googleapis.com')) {
+    const model = /models\/([^:]+):/.exec(u)[1];
+    if (busy.has(model)) return new Response(JSON.stringify({ error: { code: 503, message: 'This model is currently experiencing high demand.' } }), { status: 503 });
     return new Response(JSON.stringify(geminiReply), { status: geminiStatus });
   }
   return new Response('unexpected', { status: 500 });
 };
 
-const reset = () => { isAdmin = true; geminiStatus = 200; calls = [];
+const reset = () => { isAdmin = true; geminiStatus = 200; calls = []; busy = new Set();
   geminiReply = { candidates: [{ content: { parts: [{ text: '  "A relaxed silk set with a soft drape."  ' }] } }] }; };
 const req = (body, { token = 'user-jwt', method = 'POST' } = {}) => new Request('https://x/api/describe', {
   method,
@@ -98,6 +101,25 @@ const noPhotos = await handle(req({ ...good, images: [] }), env);
 check('no photos still works, from the details alone', noPhotos.status === 200);
 
 // --- when Gemini fails
+// A busy model hands over to the next Flash model rather than failing.
+const tried = () => calls.filter(c => c.url.includes('generativelanguage')).map(c => /models\/([^:]+):/.exec(c.url)[1]);
+reset(); busy = new Set(['gemini-3.8-flash']);
+const fellBack = await handle(req(good), env);
+check('3.8 Flash busy -> 3.6 Flash answers', fellBack.status === 200 && JSON.stringify(tried()) === JSON.stringify(['gemini-3.8-flash', 'gemini-3.6-flash']));
+reset(); busy = new Set(['gemini-3.8-flash', 'gemini-3.6-flash']);
+await handle(req(good), env);
+check(`then 2.5 Flash (${tried().join(' > ')})`, JSON.stringify(tried()) === JSON.stringify(['gemini-3.8-flash', 'gemini-3.6-flash', 'gemini-2.5-flash']));
+reset(); busy = new Set(['gemini-3.8-flash', 'gemini-3.6-flash', 'gemini-2.5-flash']);
+const allBusy = await handle(req(good), env);
+const allBusyText = await allBusy.text();
+check(`all busy -> a 4xx that says so ("${allBusyText}")`, allBusy.status === 429 && /try again later/i.test(allBusyText));
+reset(); geminiStatus = 400; geminiReply = { error: { message: 'API key not valid.' } };
+await handle(req(good), env);
+check('a bad key is not retried on other models', tried().length === 1);
+reset(); busy = new Set(['gemini-2.5-flash']);
+await handle(req(good), { ...env, GEMINI_MODEL: 'gemini-2.5-flash' });
+check('a GEMINI_MODEL override is tried first, then the defaults', tried()[0] === 'gemini-2.5-flash' && tried()[1] === 'gemini-3.8-flash');
+
 reset(); geminiStatus = 429; geminiReply = { error: { message: 'quota' } };
 const limited = await handle(req(good), env);
 check('Gemini over its limit -> 429 passed on', limited.status === 429);
