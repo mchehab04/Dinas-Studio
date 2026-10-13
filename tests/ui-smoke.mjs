@@ -622,22 +622,22 @@ check(`cleared, the automatic headline returns ("${salePhotos.auto}")`, salePhot
 // discountPercent at all in that state, which is how the note request knows
 // to wait. After the migration it must still be fetched.
 const noteLoad = await page.evaluate(async () => {
-  const real = apiService.getSaleNote;
+  const real = apiService.getShopSettings;
   let calls = 0;
-  apiService.getSaleNote = async () => { calls++; return 'Ends Sunday'; };
+  apiService.getShopSettings = async () => { calls++; return { sale_note: 'Ends Sunday' }; };
   const saved = PRODUCTS.map(p => p.discountPercent);
   const savedNote = saleNoteText;
 
   PRODUCTS.forEach(p => { delete p.discountPercent; });     // pre-migration rows
   saleNoteText = '';
-  await loadSaleNote();
+  await loadShopSettings();
   const before = { calls, note: saleNoteText };
 
   PRODUCTS.forEach(p => { p.discountPercent = 0; });        // migrated rows
-  await loadSaleNote();
+  await loadShopSettings();
   const after = { calls, note: saleNoteText };
 
-  apiService.getSaleNote = real;
+  apiService.getShopSettings = real;
   PRODUCTS.forEach((p, i) => { p.discountPercent = saved[i]; });
   saleNoteText = savedNote;
   return { before, after };
@@ -657,8 +657,8 @@ const stale = await page.evaluate(async () => {
   // The stand-in products below carry discountPercent, which is the signal that
   // sale-pricing.sql has run; the live database this suite talks to may not have
   // run it yet, so the note is stubbed rather than requested for real.
-  const realNote = apiService.getSaleNote;
-  apiService.getSaleNote = async () => '';
+  const realNote = apiService.getShopSettings;
+  apiService.getShopSettings = async () => ({ sale_note: '' });
   const headline = () => { const h = document.querySelector('.hero-sale h2'); return h ? h.textContent.trim() : '(no sale slide)'; };
   const chip = () => !!document.querySelector('.sale-chip');
   const reset = () => {
@@ -702,7 +702,7 @@ const stale = await page.evaluate(async () => {
 
   apiService.fetchProducts = realFetch; apiService.updateProductStock = realStock;
   apiService.getOrders = realOrders; apiService.getRestockRequests = realReqs;
-  apiService.getSaleNote = realNote;
+  apiService.getShopSettings = realNote;
   PRODUCTS = await realFetch();
   PRODUCTS.forEach((p, i) => { if (saved[i]) { p.discountPercent = saved[i].d; p.stock = saved[i].s; } });
   closeAllSheets({ keepUrl: true });
@@ -942,6 +942,22 @@ check('and in the HTML served for a product page', /<h1>Wrapped in softness/.tes
     return document.documentElement.scrollWidth > window.innerWidth;
   });
   check('on a phone, the sale slide with photos does not scroll sideways', sideways === false);
+  // Mock-up F: with a photo, the phone banner grows by at most 80px.
+  const heights = await pp.evaluate(async () => {
+    const h = () => document.querySelector('#heroTrack .hero-slide').getBoundingClientRect().height;
+    heroSettings = { ...heroSettings, hero_image: null }; applyHeroSettings();
+    const plain = h();
+    const photo = PRODUCTS.map(p => (p.images || [])[0]).find(u => /^https:\/\//.test(u || ''));
+    heroSettings = { ...heroSettings, hero_image: photo }; applyHeroSettings();
+    await new Promise(r => setTimeout(r, 300));
+    // The photo runs edge to edge across the top of the slide.
+    const sr = document.querySelector('#heroTrack .hero-slide').getBoundingClientRect();
+    const pr = document.querySelector('#heroTrack .hero-photo').getBoundingClientRect();
+    return { plain: Math.round(plain), photo: Math.round(h()), edge: Math.abs(pr.left - sr.left) < 2 && Math.abs(pr.right - sr.right) < 2 };
+  });
+  check('on a phone, the banner photo runs edge to edge', heights.edge === true);
+  check(`on a phone, the photo banner is at most 80px taller (${heights.plain} -> ${heights.photo}px)`,
+    heights.photo - heights.plain <= 80 && heights.photo > heights.plain);
   // The approved break: "Up to 15% off" / "selected pieces", not "Up to 15%" /
   // "off selected pieces", which balancing the lines would otherwise choose.
   const lines = await pp.evaluate(() => {
@@ -1328,6 +1344,111 @@ check('tapping a tile opens that piece alone, with its controls', grid.opened ==
 check('and a way back to all pieces', grid.hasBack === true);
 check('a change keeps the piece open', grid.staysOpen === true);
 check('"All pieces" returns to the grid', grid.backToGrid === true);
+
+// The stand-in upload URLs below point at example.supabase.co; answer them with
+// a 1x1 image so slide one can show the photo without a network error.
+await page.route(/example\.supabase\.co/, route => route.fulfill({ contentType: 'image/png',
+  body: Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==', 'base64') }));
+
+// The Banners tab: the main banner's text and photo, and the sale banner's
+// headline and line. Saving updates slide one on the page at once.
+const banners = await page.evaluate(async () => {
+  const realFrom = supabaseClient.from, realStorage = supabaseClient.storage;
+  const realOrders = apiService.getOrders, realReqs = apiService.getRestockRequests;
+  apiService.getOrders = async () => []; apiService.getRestockRequests = async () => [];
+  const savedSettings = { ...heroSettings }, savedNote = saleNoteText, savedTitle = saleTitleText;
+  const writes = [], uploads = [];
+  supabaseClient.from = table => ({
+    update(v){ writes.push({ table, v }); return this; },
+    eq: async () => ({ error: null })
+  });
+  supabaseClient.storage = { from: () => ({
+    upload: async (path, blob) => { uploads.push(path); return { error: null }; },
+    getPublicUrl: path => ({ data: { publicUrl: 'https://example.supabase.co/storage/v1/object/public/product-images/' + path } })
+  }) };
+  const res = {};
+  const slide1 = () => document.querySelector('#heroTrack .hero-slide');
+  try {
+    adminTab = 'banners'; await renderAdmin();
+    const c = document.getElementById('adminContent');
+    res.tab = !!c.querySelector('#bnTitle') && !!c.querySelector('#bnSaleTitle') && !!c.querySelector('#bnSaleNote');
+    res.placeholder = c.querySelector('#bnTitle').placeholder === 'Wrapped in softness, styled with heart';
+    const set = (id, v) => { const el = document.getElementById(id); el.value = v; el.dispatchEvent(new Event('input', { bubbles: true })); };
+
+    // Text: saved, then shown on slide one straight away, escaped.
+    set('bnEyebrow', 'autumn'); set('bnTitle', 'Made by hand <b>one</b> at a time'); set('bnText', 'New pieces every week.');
+    await saveMainBanner();
+    res.wrote = writes.at(-1) && writes.at(-1).table === 'shop_settings' && writes.at(-1).v.hero_title === 'Made by hand <b>one</b> at a time';
+    res.live = slide1().querySelector('h1').textContent === 'Made by hand <b>one</b> at a time' && !slide1().querySelector('h1 b');
+    res.liveEyebrow = slide1().querySelector('.eyebrow').textContent === 'autumn';
+
+    // A field too long can't be saved.
+    adminTab = 'banners'; await renderAdmin();
+    set('bnTitle', 'x'.repeat(71));
+    res.tooLongBlocked = document.getElementById('bnSaveMain').disabled === true;
+    set('bnTitle', 'Made by hand');
+
+    // Photo: two sizes uploaded under banners/, stored as the -lg URL, shown on slide one.
+    const canvas = document.createElement('canvas'); canvas.width = 40; canvas.height = 20;
+    const blob = await new Promise(r => canvas.toBlob(r, 'image/png'));
+    await pickBannerPhoto(new File([blob], 'desk.png', { type: 'image/png' }));
+    await saveMainBanner();
+    res.uploads = uploads.slice();
+    res.storedLg = /\/banners\/[^/]+-lg\.webp$/.test(writes.at(-1).v.hero_image || '');
+    res.photoShown = slide1().classList.contains('has-photo') && !!slide1().querySelector('img.hero-photo');
+    // At 1280px the photo takes the right of the slide; the copy keeps the left.
+    const sr = slide1().getBoundingClientRect(), pr = slide1().querySelector('img.hero-photo').getBoundingClientRect();
+    res.photoRight = pr.left >= sr.left + sr.width * 0.35 && Math.abs(pr.right - sr.right) < 2;
+
+    // Remove: back to the plain banner.
+    adminTab = 'banners'; await renderAdmin();
+    removeBannerPhoto();
+    await saveMainBanner();
+    res.removedNull = writes.at(-1).v.hero_image === null;
+    res.plainAgain = !slide1().classList.contains('has-photo') && !slide1().querySelector('img');
+
+    // Sale headline and line, saved together; the Inventory tab no longer has the line.
+    saleNoteText = 'Kept from before';
+    adminTab = 'banners'; await renderAdmin();
+    res.notePrefilled = document.getElementById('bnSaleNote').value === 'Kept from before';
+    set('bnSaleTitle', 'End of summer: short sets'); set('bnSaleNote', 'Ends Sunday');
+    await saveSaleBanner();
+    res.saleWrote = writes.at(-1).v.sale_title === 'End of summer: short sets' && writes.at(-1).v.sale_note === 'Ends Sunday';
+    res.saleState = saleTitleText === 'End of summer: short sets' && saleNoteText === 'Ends Sunday';
+    adminTab = 'inventory'; await renderAdmin();
+    res.noteMoved = !document.getElementById('saleNoteInput');
+
+    // Clearing every main field brings the defaults back.
+    adminTab = 'banners'; await renderAdmin();
+    set('bnEyebrow', ''); set('bnTitle', ''); set('bnText', '');
+    await saveMainBanner();
+    res.defaultsBack = slide1().querySelector('h1').textContent === 'Wrapped in softness, styled with heart'
+      && writes.at(-1).v.hero_title === null;
+  } finally {
+    supabaseClient.from = realFrom; supabaseClient.storage = realStorage;
+    apiService.getOrders = realOrders; apiService.getRestockRequests = realReqs;
+    heroSettings = savedSettings; saleNoteText = savedNote; saleTitleText = savedTitle;
+    applyHeroSettings(); renderHero(); closeAllSheets({ keepUrl: true });
+  }
+  return res;
+}).catch(e => ({ error: e.message }));
+if (banners.error) console.log('Banners tab checks unavailable:', String(banners.error).slice(0, 200));
+check('the admin panel has a Banners tab with both banners\' fields', banners.tab === true);
+check('empty fields show the default text as a hint', banners.placeholder === true);
+check('saving the main banner writes shop_settings', banners.wrote === true);
+check('and slide one shows it at once, as text', banners.live === true && banners.liveEyebrow === true);
+check('a 71-character headline cannot be saved', banners.tooLongBlocked === true);
+check(`a banner photo is uploaded in two sizes under banners/ (${(banners.uploads || []).join(', ')})`,
+  (banners.uploads || []).length === 2 && banners.uploads.every(p => /^banners\//.test(p)));
+check('and stored as the -lg URL', banners.storedLg === true);
+check('and shown on slide one', banners.photoShown === true);
+check('on a computer, the photo is on the right of the banner', banners.photoRight === true);
+check('removing the photo stores nothing', banners.removedNull === true);
+check('and slide one is the plain banner again', banners.plainAgain === true);
+check('the sale line keeps its saved value in the Banners tab', banners.notePrefilled === true);
+check('the sale headline and line save together', banners.saleWrote === true && banners.saleState === true);
+check('the sale line has moved out of Inventory', banners.noteMoved === true);
+check('cleared fields bring the default banner back', banners.defaultsBack === true);
 
 check('a sale carousel advances on its own', await rotation(false) === true);
 check('but not for a visitor who asked to reduce motion', await rotation(true) === false);

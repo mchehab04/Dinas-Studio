@@ -212,22 +212,21 @@ const apiService = {
       throw e;
     }
   },
-  // The optional line under the sale banner's headline. One row; read signed
-  // out by every visitor, written only by an admin.
-  async getSaleNote() {
+  // The one shop_settings row: the sale banner line and headline, and the main
+  // banner's text and photo. Read signed out by every visitor, written only by
+  // an admin. PGRST205 is "no such table": the site deployed before
+  // sale-pricing.sql ran, so there is nothing to show and nothing worth logging.
+  // saveShopSettings stays loud either way, so the owner still finds out the
+  // moment she tries to use it.
+  async getShopSettings() {
     const { data, error } = await supabaseClient
-      .from('shop_settings').select('sale_note').eq('id', 1).single();
-    // PGRST205 is "no such table": the site deployed before sale-pricing.sql
-    // ran. There is no note to show yet, and logging it would put an error in
-    // every visitor's console until the migration is run. Anything else is a
-    // real failure and is logged. saveSaleNote stays loud either way, so the
-    // owner still finds out the moment she tries to use it.
-    if(error){ if(error.code !== 'PGRST205') console.error(error); return ''; }
-    return (data && data.sale_note) || '';
+      .from('shop_settings').select('*').eq('id', 1).single();
+    if(error){ if(error.code !== 'PGRST205') console.error(error); return {}; }
+    return data || {};
   },
-  async saveSaleNote(text) {
+  async saveShopSettings(fields) {
     const { error } = await supabaseClient
-      .from('shop_settings').update({ sale_note: text || null }).eq('id', 1);
+      .from('shop_settings').update(fields).eq('id', 1);
     if(error) { console.error(error); return false; }
     return true;
   },
@@ -691,9 +690,40 @@ function startHeroRotation(count){
 // it makes the browser log a 404 in every visitor's console. Products carry no
 // discountPercent at all in that state — the migration gives every row one — so
 // that is what says the table is there to read.
-async function loadSaleNote(){
+let heroSettings = {};   // the raw shop_settings row, for slide one and the Banners tab
+async function loadShopSettings(){
   if(!PRODUCTS.some(p => 'discountPercent' in p)) return;
-  try { saleNoteText = await apiService.getSaleNote(); } catch(_){}
+  try {
+    heroSettings = await apiService.getShopSettings();
+    saleNoteText = heroSettings.sale_note || '';
+    saleTitleText = heroSettings.sale_title || '';
+  } catch(_){}
+}
+
+// Mirrors HERO_DEFAULTS in lib/hero.js, which writes slide one into the page
+// before it is sent. This copy only rebuilds it in place after the owner
+// saves, so she sees her change without waiting for the 5-minute cache.
+const BANNER_DEFAULTS = {
+  eyebrow: 'new season',
+  title: 'Wrapped in softness, styled with heart',
+  text: 'Matching sets, abayas & kimonos designed for effortless elegance — made to move with you.'
+};
+function applyHeroSettings(){
+  const slide = document.querySelector('#heroTrack .hero-slide');
+  if(!slide) return;
+  const s = heroSettings || {};
+  const pick = (v, d) => (typeof v === 'string' && v.trim()) ? v.trim() : d;
+  const image = /^https:\/\//.test(s.hero_image || '') ? s.hero_image : '';
+  const sm = image && smallVariant(image);
+  slide.className = 'hero hero-slide' + (image ? ' has-photo' : '');
+  slide.innerHTML = `
+    ${image ? `<img class="hero-photo" src="${escHtml(image)}"${sm ? ` srcset="${escHtml(sm)} 800w, ${escHtml(image)} 1600w" sizes="(max-width:640px) 100vw, 60vw"` : ''} alt="">` : ''}
+    <div class="hero-copy">
+      <div class="eyebrow">${escHtml(pick(s.hero_eyebrow, BANNER_DEFAULTS.eyebrow))}</div>
+      <h1>${escHtml(pick(s.hero_title, BANNER_DEFAULTS.title))}</h1>
+      <p>${escHtml(pick(s.hero_text, BANNER_DEFAULTS.text))}</p>
+      <button class="hero-cta" onclick="shopFromHero(false)">Shop the collection ${HERO_ARROW}</button>
+    </div>`;
 }
 
 function pauseHero(){ clearInterval(heroTimer); heroTimer = null; }
@@ -1456,6 +1486,12 @@ const PHOTO_SIZES = [
   { suffix: 'lg', edge: 900, quality: 0.80 }
 ];
 
+// A banner is wide and shown up to full width, so it gets its own pair.
+const BANNER_SIZES = [
+  { suffix: 'sm', edge: 800,  quality: 0.80 },
+  { suffix: 'lg', edge: 1600, quality: 0.82 }
+];
+
 // Never upscales: a photo smaller than the target keeps its own dimensions.
 async function resizeToWebp(file, edge, quality){
   const bitmap = await createImageBitmap(file);
@@ -1483,10 +1519,10 @@ function photoRejection(file){
 // meant re-editing a product overwrote the file already sitting at that slot:
 // the URL never changed, so browsers and the CDN kept serving the old picture,
 // and a kept image could end up listed twice under one URL.
-async function uploadPhoto(file, folder){
+async function uploadPhoto(file, folder, sizes = PHOTO_SIZES){
   const stamp = `${Date.now().toString(36)}${Math.random().toString(36).slice(2, 8)}`;
   let lgUrl = null;
-  for(const { suffix, edge, quality } of PHOTO_SIZES){
+  for(const { suffix, edge, quality } of sizes){
     const blob = await resizeToWebp(file, edge, quality);
     const path = `${folder}/${stamp}-${suffix}.webp`;
     const { error } = await supabaseClient.storage.from(PHOTO_BUCKET)
@@ -2046,6 +2082,12 @@ async function openAdmin() {
 }
 
 async function setAdminTab(tab) {
+  // Leaving the Banners tab drops an unsaved photo pick, as the product photo
+  // picker does below.
+  if(tab !== 'banners' && bannerDraft){
+    if(bannerDraft.preview) URL.revokeObjectURL(bannerDraft.preview);
+    bannerDraft = undefined;
+  }
   // Leaving the picker behind discards unsaved picks rather than carrying them
   // into the next piece. The photos tab is the exception: openPhotoEditor fills
   // the draft before switching to it.
@@ -2166,13 +2208,6 @@ async function renderAdmin() {
         <span style="font-size:13px; color:var(--ink-soft);">Manage stock for <strong>${PRODUCTS.length} pieces</strong></span>
         <button class="primary-btn" style="font-size:11.5px; padding:6px 12px; flex:0 0 auto;" onclick="setAdminTab('add')">+ Add Piece</button>
       </div>
-      <div class="sale-note-row">
-        <input class="form-input" id="saleNoteInput" maxlength="60"
-               placeholder="Optional sale banner line, e.g. Ends Sunday" value="${escHtml(saleNoteText)}">
-        <button class="stock-toggle-btn" onclick="saveSaleNote()">Save note</button>
-      </div>
-
-
       ${openPiece ? `
         <button class="sort-btn inv-back" onclick="closeInventoryItem()">← All pieces</button>
         <div class="inventory-list">${inventoryItemHtml(openPiece, waiting)}</div>` : `
@@ -2270,6 +2305,37 @@ async function renderAdmin() {
         <button class="filter-btn" style="width:100%; margin-top:14px;" onclick="setAdminTab('inventory')">Back to Inventory</button>
       </div>
     ` : `<p style="font-size:13px; color:var(--ink-soft);">No piece selected.</p>`;
+  } else if(adminTab === 'banners') {
+    const s = heroSettings || {};
+    const photo = bannerDraft === undefined ? (s.hero_image || '') : (bannerDraft ? bannerDraft.preview : '');
+    bodyContent = `
+      <div class="banner-form">
+        <h3>Main banner</h3>
+        <p class="banner-hint">Empty fields use the default text shown in grey. The photo sits on the right on a computer and across the top on a phone, so keep its subject on the right half.</p>
+        <label class="form-label" for="bnEyebrow">Small heading</label>
+        <input class="form-input" id="bnEyebrow" maxlength="30" placeholder="${escHtml(BANNER_DEFAULTS.eyebrow)}" value="${escHtml(s.hero_eyebrow || '')}">
+        <label class="form-label" for="bnTitle">Headline</label>
+        <input class="form-input" id="bnTitle" data-max="70" placeholder="${escHtml(BANNER_DEFAULTS.title)}" value="${escHtml(s.hero_title || '')}">
+        <label class="form-label" for="bnText">Line under the headline</label>
+        <textarea class="form-input" id="bnText" rows="2" maxlength="140" placeholder="${escHtml(BANNER_DEFAULTS.text)}">${escHtml(s.hero_text || '')}</textarea>
+        <label class="form-label">Photo</label>
+        <div class="banner-photo">
+          ${photo ? `<img src="${escHtml(photo)}" alt="Current banner photo">` : `<span class="banner-photo-empty">No photo: the banner shows the rose background</span>`}
+          <div class="banner-photo-actions">
+            <label class="stock-toggle-btn">${photo ? 'Replace' : 'Choose photo'}<input type="file" accept="image/*" hidden onchange="pickBannerPhoto(this.files[0])"></label>
+            ${photo ? `<button class="stock-toggle-btn" onclick="removeBannerPhoto()">Remove</button>` : ''}
+          </div>
+        </div>
+        <button class="primary-btn" id="bnSaveMain" onclick="saveMainBanner()">Save main banner</button>
+
+        <h3>Sale banner</h3>
+        <p class="banner-hint">Shown only while something is on sale. Its photos are the pieces on sale, biggest discount first.</p>
+        <label class="form-label" for="bnSaleTitle">Sale headline</label>
+        <input class="form-input" id="bnSaleTitle" data-max="70" placeholder="Up to N% off selected pieces" value="${escHtml(s.sale_title || '')}">
+        <label class="form-label" for="bnSaleNote">Line under it</label>
+        <input class="form-input" id="bnSaleNote" maxlength="60" placeholder="e.g. Ends Sunday" value="${escHtml(saleNoteText)}">
+        <button class="primary-btn" id="bnSaveSale" onclick="saveSaleBanner()">Save sale banner</button>
+      </div>`;
   } else if(adminTab === 'photos') {
     const p = photoEditProduct;
     bodyContent = p ? `
@@ -2293,10 +2359,89 @@ async function renderAdmin() {
       <button class="admin-tab ${adminTab==='orders'?'active':''}" onclick="setAdminTab('orders')">Orders & Stats</button>
       <button class="admin-tab ${adminTab==='inventory'?'active':''}" onclick="setAdminTab('inventory')">Inventory & Stock</button>
       <button class="admin-tab ${adminTab==='add'?'active':''}" onclick="setAdminTab('add')">+ Add Piece</button>
+      <button class="admin-tab ${adminTab==='banners'?'active':''}" onclick="setAdminTab('banners')">Banners</button>
     </div>
 
     ${bodyContent}
   `;
+  if(adminTab === 'banners') wireBannerForm();
+}
+
+// undefined: no change to the photo. null: removed. { file, preview }: a new one.
+let bannerDraft = undefined;
+
+// The headlines use data-max rather than maxlength, so an over-long paste is
+// visible and blocks Save instead of being silently cut.
+function wireBannerForm(){
+  const guard = (fieldIds, btnId) => {
+    const btn = document.getElementById(btnId);
+    const refresh = () => {
+      btn.disabled = fieldIds.some(id => {
+        const el = document.getElementById(id);
+        return el && el.dataset.max && el.value.trim().length > Number(el.dataset.max);
+      });
+      fieldIds.forEach(id => {
+        const el = document.getElementById(id);
+        if(el && el.dataset.max) el.classList.toggle('invalid', el.value.trim().length > Number(el.dataset.max));
+      });
+    };
+    fieldIds.forEach(id => document.getElementById(id).addEventListener('input', refresh));
+    refresh();
+  };
+  guard(['bnEyebrow', 'bnTitle', 'bnText'], 'bnSaveMain');
+  guard(['bnSaleTitle', 'bnSaleNote'], 'bnSaveSale');
+}
+
+async function pickBannerPhoto(file){
+  if(!file) return;
+  const problem = photoRejection(file);
+  if(problem){ showToast(problem); return; }
+  if(bannerDraft && bannerDraft.preview) URL.revokeObjectURL(bannerDraft.preview);
+  bannerDraft = { file, preview: URL.createObjectURL(file) };
+  await renderAdmin();
+}
+
+function removeBannerPhoto(){
+  if(bannerDraft && bannerDraft.preview) URL.revokeObjectURL(bannerDraft.preview);
+  bannerDraft = null;
+  renderAdmin();
+}
+
+async function saveMainBanner(){
+  const val = id => document.getElementById(id).value.trim();
+  const fields = { hero_eyebrow: val('bnEyebrow') || null, hero_title: val('bnTitle') || null, hero_text: val('bnText') || null };
+  if((fields.hero_title || '').length > 70){ showToast('Keep the headline to 70 characters'); return; }
+  const btn = document.getElementById('bnSaveMain');
+  if(btn) btn.disabled = true;
+  try {
+    if(bannerDraft === null) fields.hero_image = null;
+    else if(bannerDraft) fields.hero_image = await uploadPhoto(bannerDraft.file, 'banners', BANNER_SIZES);
+  } catch(e){
+    console.error(e);
+    showToast(e.message || 'Upload failed — please try again', 8000);
+    if(btn) btn.disabled = false;
+    return;
+  }
+  const ok = await apiService.saveShopSettings(fields);
+  if(ok){
+    heroSettings = { ...heroSettings, ...fields };
+    if(bannerDraft && bannerDraft.preview) URL.revokeObjectURL(bannerDraft.preview);
+    bannerDraft = undefined;
+    applyHeroSettings();
+  }
+  showToast(ok ? 'Main banner saved ✓ — visitors see it within 5 minutes' : "Couldn't save that — please try again");
+  await renderAdmin();
+}
+
+async function saveSaleBanner(){
+  const title = document.getElementById('bnSaleTitle').value.trim();
+  const note = document.getElementById('bnSaleNote').value.trim();
+  if(title.length > 70){ showToast('Keep the sale headline to 70 characters'); return; }
+  const ok = await apiService.saveShopSettings({ sale_title: title || null, sale_note: note || null });
+  if(ok){ saleTitleText = title; saleNoteText = note; heroSettings = { ...heroSettings, sale_title: title || null, sale_note: note || null }; }
+  showToast(ok ? 'Sale banner saved ✓' : "Couldn't save that — please try again");
+  renderHero();
+  await renderAdmin();
 }
 
 async function savePhotos(){
@@ -2580,16 +2725,6 @@ async function afterSaleChange(productId){
   if(state.bag.length) renderBag();
 }
 
-async function saveSaleNote(){
-  const input = document.getElementById('saleNoteInput');
-  if(!input) return;
-  const text = input.value.trim();
-  const ok = await apiService.saveSaleNote(text);
-  if(ok) saleNoteText = text;   // the hero renders from this copy
-  showToast(ok ? (text ? 'Banner note saved ✓' : 'Banner note cleared') : "Couldn't save that — please try again");
-  renderHero();
-}
-
 async function setProductStock(productId, stockStatus) {
   const updated = await apiService.updateProductStock(productId, stockStatus);
   if(!updated) { showToast("Failed to update stock"); return; }
@@ -2738,7 +2873,7 @@ async function retryProducts(){
   lastGridSignature = null;
   renderGrid();
   // A first load that failed never fetched the note or built the sale slide.
-  await loadSaleNote();
+  await loadShopSettings();
   refreshSale();
 }
 
@@ -2767,7 +2902,7 @@ async function initApp() {
   renderTopTabs();
   renderFilterPanel();
   renderGrid();
-  await loadSaleNote();
+  await loadShopSettings();
   renderHero();
   wireHero();
   updateBagBadge();

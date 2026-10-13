@@ -246,7 +246,8 @@
       -webkit-mask-image:linear-gradient(180deg, #000 45%, transparent 100%);
               mask-image:linear-gradient(180deg, #000 45%, transparent 100%);
     }
-    .hero-photo{ width:calc(100% + 40px); }
+    /* max-width:none: the site-wide img{max-width:100%} would stop it 40px short */
+    .hero-photo{ width:calc(100% + 40px); max-width:none; }
     .sale-photos{ display:flex; }
     .hero-slide.has-photo .hero-copy, .hero-sale.has-photos .hero-copy{ max-width:none; }
     .hero-slide.has-photo h1, .hero-sale.has-photos h2{ font-size:26px; line-height:1.15; max-width:none; }
@@ -1232,6 +1233,18 @@ button:disabled {
 .inv-tile-price{ font-size:12px; font-weight:700; color:var(--primary); }
 .inv-tile-price .sale-was{ display:inline; margin-right:4px; }
 .inv-back{ margin-bottom:10px; }
+/* Banners tab */
+.banner-form{ display:flex; flex-direction:column; gap:6px; background:var(--surface); border:1px solid var(--line); border-radius:var(--radius-md); padding:16px; }
+.banner-form h3{ font-size:16px; margin:10px 0 2px; color:var(--ink); }
+.banner-form h3:first-child{ margin-top:0; }
+.banner-hint{ font-size:12.5px; color:var(--ink-soft); margin:0 0 6px; }
+.banner-form .primary-btn{ align-self:flex-start; flex:0 0 auto; padding:10px 18px; font-size:13px; margin-top:8px; }
+.banner-photo{ display:flex; gap:12px; align-items:center; flex-wrap:wrap; }
+.banner-photo img{ width:220px; max-width:100%; aspect-ratio:16/7; object-fit:cover; border-radius:var(--radius-sm); border:1px solid var(--line); }
+.banner-photo-empty{ font-size:12.5px; color:var(--ink-soft); }
+.banner-photo-actions{ display:flex; gap:6px; }
+.banner-photo-actions label{ cursor:pointer; }
+.form-input.invalid{ border-color:var(--danger); }
 /* The admin panel gets the room a desktop has; the shopper sheets stay narrow. */
 @media (min-width:900px){
   #adminSheet{ max-width:min(1100px, calc(100vw - 48px)); max-height:94vh; }
@@ -1290,12 +1303,10 @@ button:disabled {
 .details-form .form-label{ margin-top:6px; }
 .details-form .form-row-2{ gap:10px; }
 .details-actions{ display:flex; flex-wrap:wrap; gap:6px; margin-top:8px; }
-.sale-note-row{ display:flex; gap:8px; align-items:center; flex-wrap:wrap; margin-bottom:14px; }
 /* In the inventory's "Category • price" line the struck price stays inline:
    as a block it broke the line and left the bullet dangling. It carries no
    dollar figure, so it cannot run into the live price the way it did on cards. */
 .inventory-meta .sale-was{ display:inline; margin-right:6px; }
-.sale-note-row .form-input{ flex:1; min-width:180px; padding:8px 12px; font-size:12.5px; }
 
 .stock-toggle-btn.active-in {
   background: #E8F5E9;
