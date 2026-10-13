@@ -233,6 +233,15 @@ const apiService = {
   },
   // 0 clears the sale. Clamped here as well as refused by the editor, and the
   // database's check constraint refuses anything outside 0-90 regardless.
+  async updateProductPrice(id, price) {
+    const { data, error } = await supabaseClient
+      .from('products').update({ price }).eq('id', id).select().single();
+    if(error) { console.error(error); return null; }
+    const idx = PRODUCTS.findIndex(x => x.id === id);
+    if(idx !== -1) PRODUCTS[idx] = data;
+    storageService.saveProducts(PRODUCTS);
+    return data;
+  },
   async updateProductDesc(id, desc) {
     const { data, error } = await supabaseClient
       .from('products').update({ desc }).eq('id', id).select().single();
@@ -2161,6 +2170,7 @@ async function renderAdmin() {
               <button class="stock-toggle-btn ${p.stock==='out'?'active-out':''}" onclick="setProductStock(${p.id}, 'out')">Sold Out</button>
               <button class="stock-toggle-btn" onclick="openPhotoEditor(${p.id})">Photos (${(p.images||[]).length})</button>
               <button class="stock-toggle-btn" onclick="openDescEditor(${p.id})">Description</button>
+              <button class="stock-toggle-btn" onclick="openPriceEditor(${p.id})">Price</button>
               <button class="stock-toggle-btn ${isOnSale(p) ? 'sale-set' : ''}" onclick="openSaleEditor(${p.id})">${isOnSale(p) ? `Sale ${discountOf(p)}%` : 'Sale'}</button>
               ${waiting.filter(r => r.product_id === p.id).length ? `
                 <button class="stock-toggle-btn waiting-btn" onclick="openWaitingList(${p.id})">
@@ -2346,6 +2356,45 @@ function openSaleEditor(productId){
   input.focus();
 }
 
+// The full price in AED, before any sale. Up to 2 decimals, under 100,000.
+// A sale's percentage applies on top of whatever is set here.
+function validPrice(v){
+  const t = String(v).trim();
+  return /^[0-9]{1,5}(\.[0-9]{1,2})?$/.test(t) && Number(t) > 0;
+}
+function openPriceEditor(productId){
+  const p = PRODUCTS.find(x => x.id === productId);
+  const row = document.getElementById('invRow' + productId);
+  if(!p || !row) return;
+  row.innerHTML = `
+    <input class="form-input sale-input" id="priceInput${productId}" type="text" inputmode="decimal"
+           value="${p.price}" placeholder="AED" maxlength="8" aria-label="Price in AED" style="width:96px;">
+    <button class="stock-toggle-btn" id="priceSave${productId}" onclick="savePriceEditor(${productId})">Save</button>
+    <button class="stock-toggle-btn" onclick="renderAdmin()">Cancel</button>`;
+  const input = document.getElementById('priceInput' + productId);
+  const save = document.getElementById('priceSave' + productId);
+  const refresh = () => {
+    const ok = validPrice(input.value);
+    save.disabled = !ok;
+    input.classList.toggle('invalid', !ok && input.value.trim() !== '');
+  };
+  input.addEventListener('input', refresh);
+  input.addEventListener('keydown', e => {
+    if(e.key === 'Enter'){ e.preventDefault(); if(validPrice(input.value)) savePriceEditor(productId); }
+    if(e.key === 'Escape') renderAdmin();
+  });
+  refresh();
+  input.focus();
+}
+async function savePriceEditor(productId){
+  const input = document.getElementById('priceInput' + productId);
+  if(!input || !validPrice(input.value)){ showToast('Enter a price in AED, like 450'); return; }
+  const price = Number(input.value.trim());
+  const updated = await apiService.updateProductPrice(productId, price);
+  showToast(updated ? `"${updated.name}" is now AED ${price} ✓` : "Couldn't save that — please try again");
+  await afterSaleChange(productId);
+}
+
 // Opens in the row's button area, like the sale editor. Save stays disabled
 // while the text is blank.
 function openDescEditor(productId){
@@ -2376,10 +2425,19 @@ async function draftDescription({ name, cat, fabric, photos }){
   const token = data && data.session && data.session.access_token;
   if(!token){ showToast('Sign in again to use this'); return null; }
   try {
-    const images = await Promise.all((photos || []).slice(0, 3).map(async src => {
-      const blob = src instanceof Blob ? src : await (await fetch(src)).blob();
-      return { mimeType: 'image/webp', data: await blobToBase64(await resizeToWebp(blob, 768, 0.8)) };
-    }));
+    // A photo that won't load or decode is left out rather than failing the
+    // whole draft; the details alone still give a usable description.
+    const images = (await Promise.all((photos || []).slice(0, 3).map(async src => {
+      try {
+        const res = src instanceof Blob ? null : await fetch(src);
+        if(res && !res.ok) throw new Error(`photo ${res.status}`);
+        const blob = res ? await res.blob() : src;
+        return { mimeType: 'image/webp', data: await blobToBase64(await resizeToWebp(blob, 768, 0.8)) };
+      } catch(e){
+        console.warn('Skipping a photo for the AI draft:', e.message);
+        return null;
+      }
+    }))).filter(Boolean);
     const res = await fetch('/api/describe', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },

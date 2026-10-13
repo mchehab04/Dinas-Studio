@@ -1059,6 +1059,51 @@ check('and enabled once something is typed', descEdit.editedEnabled === true);
 check(`saving writes the new text ("${descEdit.written}")`, descEdit.written === 'A new <b>description</b>');
 check('and the shop shows it without a reload', descEdit.local === 'A new <b>description</b>');
 
+// The price can be edited from the inventory row, in AED.
+const priceEdit = await page.evaluate(async () => {
+  const realFrom = supabaseClient.from;
+  const realOrders = apiService.getOrders, realReqs = apiService.getRestockRequests;
+  apiService.getOrders = async () => []; apiService.getRestockRequests = async () => [];
+  const target = PRODUCTS.find(p => p.stock !== 'out');
+  const saved = target.price;
+  let written = null;
+  supabaseClient.from = () => ({ v: null,
+    update(v){ this.v = v; return this; }, eq(){ return this; }, select(){ return this; },
+    single: async function(){ written = this.v; return { data: { ...PRODUCTS.find(p => p.id === target.id), ...this.v }, error: null }; } });
+  const res = {};
+  try {
+    adminTab = 'inventory'; await renderAdmin();
+    res.hasButton = !!document.querySelector(`#invRow${target.id} [onclick^="openPriceEditor"]`);
+    openPriceEditor(target.id);
+    const input = document.getElementById('priceInput' + target.id);
+    const save = document.getElementById('priceSave' + target.id);
+    res.prefilled = input && Number(input.value) === Number(saved);
+    const disabledFor = v => { input.value = v; input.dispatchEvent(new Event('input')); return save.disabled; };
+    res.rejects = ['', '0', '-5', 'abc', '12.345', '100000'].map(v => [v, disabledFor(v)]);
+    res.accepts = ['450', '199.5'].map(v => [v, !disabledFor(v)]);
+    disabledFor('450');
+    await savePriceEditor(target.id);
+    res.written = written && written.price;
+    res.local = PRODUCTS.find(p => p.id === target.id).price;
+    res.rowShows = (document.getElementById('adminContent').innerText || '').includes('AED 450');
+  } finally {
+    supabaseClient.from = realFrom; apiService.getOrders = realOrders; apiService.getRestockRequests = realReqs;
+    PRODUCTS.find(p => p.id === target.id).price = saved;
+    lastGridSignature = null; renderGrid(); closeAllSheets({ keepUrl: true });
+  }
+  return res;
+}).catch(e => ({ error: e.message }));
+if (priceEdit.error) console.log('price editor unavailable:', String(priceEdit.error).slice(0, 160));
+check('each inventory row has a Price button', priceEdit.hasButton === true);
+check('the editor opens with the current price', priceEdit.prefilled === true);
+check(`Save is disabled for blank, zero, negative, text, 3 decimals or 100000 (${JSON.stringify(priceEdit.rejects)})`,
+  Array.isArray(priceEdit.rejects) && priceEdit.rejects.every(([, d]) => d === true));
+check(`and enabled for 450 and 199.5 (${JSON.stringify(priceEdit.accepts)})`,
+  Array.isArray(priceEdit.accepts) && priceEdit.accepts.every(([, ok]) => ok === true));
+check(`saving writes the price as a number (${priceEdit.written})`, priceEdit.written === 450);
+check('the shop uses it without a reload', priceEdit.local === 450);
+check('and the inventory row shows it', priceEdit.rowShows === true);
+
 // "Write with AI" drafts a description through /api/describe and only fills
 // the box: nothing is saved until the admin presses Save.
 const aiDesc = await page.evaluate(async () => {
@@ -1094,6 +1139,16 @@ const aiDesc = await page.evaluate(async () => {
     res.keptOnError = box.value === 'kept';
     res.errorToast = document.getElementById('toast').textContent;
 
+    // A photo that won't load is skipped; the draft still goes ahead.
+    reply = { status: 200, body: JSON.stringify({ text: 'Drafted without one photo.' }) };
+    sent.length = 0;
+    const brokenFirst = target.images[0];
+    const passFetch = window.fetch;
+    window.fetch = async (url, init) => String(url) === brokenFirst ? new Response('gone', { status: 404 }) : passFetch(url, init);
+    await aiFillDesc(target.id);
+    window.fetch = passFetch;
+    res.skippedBroken = box.value === 'Drafted without one photo.' && !!sent[0] && sent[0].body.images.length === res.expectPhotos - 1;
+
     // The Add Piece form, before any photo is added.
     adminTab = 'add'; await renderAdmin();
     sent.length = 0; reply = { status: 200, body: JSON.stringify({ text: 'A new piece, drafted.' }) };
@@ -1118,6 +1173,7 @@ check('and the piece\'s name', aiDesc.name === true);
 check(`and its photos, shrunk to WebP (${aiDesc.photoCount} of ${aiDesc.expectPhotos})`, aiDesc.photoCount === aiDesc.expectPhotos && aiDesc.webp === true);
 check('an error leaves the text as it was', aiDesc.keptOnError === true);
 check(`and says why ("${aiDesc.errorToast}")`, /try again later/i.test(aiDesc.errorToast || ''));
+check('a photo that won\'t load is skipped, not fatal', aiDesc.skippedBroken === true);
 check('Add Piece asks for a name before drafting', aiDesc.noNameBlocked === true);
 check(`and then fills its description ("${aiDesc.addFilled}")`, aiDesc.addFilled === 'A new piece, drafted.' && aiDesc.addSentName === 'Test Abaya');
 

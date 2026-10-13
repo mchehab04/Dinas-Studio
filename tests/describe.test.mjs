@@ -103,5 +103,15 @@ check('and says to try later', /try again later/i.test(await limited.text()));
 reset(); geminiStatus = 500; geminiReply = { error: { message: 'boom' } };
 check('a Gemini error -> 502', (await handle(req(good), env)).status === 502);
 
+// Google's own reason reaches the admin's toast, so a bad key or a retired
+// model says so instead of a bare status code.
+reset(); geminiStatus = 400; geminiReply = { error: { code: 400, message: 'API key not valid. Please pass a valid API key.', status: 'INVALID_ARGUMENT' } };
+const badKey = await handle(req(good), env);
+const badKeyText = await badKey.text();
+check(`a rejected key says why ("${badKeyText}")`, badKey.status === 502 && badKeyText.includes('API key not valid'));
+check('without echoing the key itself', !badKeyText.includes('gem-key'));
+reset(); geminiStatus = 404; geminiReply = { error: { code: 404, message: 'models/gemini-x is not found for API version v1beta', status: 'NOT_FOUND' } };
+check('a retired model says which', (await (await handle(req(good), env)).text()).includes('gemini-x is not found'));
+
 reset(); geminiReply = { candidates: [{ content: { parts: [] } }] };
 check('an empty answer -> 502', (await handle(req(good), env)).status === 502);
