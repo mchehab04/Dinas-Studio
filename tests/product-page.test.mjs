@@ -97,7 +97,8 @@ check('a canonical URL returns 200', ok.status === 200);
 check('it is served as html', ok.headers.get('content-type').includes('text/html'));
 check('it is cached briefly, not forever', /max-age=300/.test(ok.headers.get('cache-control')));
 check('the body is the rewritten shell', (await ok.text()).includes('window.__OPEN_PRODUCT__ = 7;'));
-check('the piece is read by id', fetched[0].includes('products?id=eq.7'));
+// The banner settings are read alongside the piece, so look among the fetches.
+check('the piece is read by id', fetched.some(u => u.includes('products?id=eq.7')));
 
 const moved = await get('/p/an-old-name-7');
 check('a stale slug redirects', moved.status === 301);
