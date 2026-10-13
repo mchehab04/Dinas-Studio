@@ -942,6 +942,20 @@ check('and in the HTML served for a product page', /<h1>Wrapped in softness/.tes
     return document.documentElement.scrollWidth > window.innerWidth;
   });
   check('on a phone, the sale slide with photos does not scroll sideways', sideways === false);
+  // A phone turned sideways (667px) gets the desktop layout with narrow tiles;
+  // every price tag must sit fully inside its photo, not be cut off.
+  await pp.setViewportSize({ width: 667, height: 375 });
+  await pp.waitForTimeout(300);
+  const clipped = await pp.evaluate(() => {
+    heroGo(1);
+    return [...document.querySelectorAll('.hero-sale .sale-photo')].filter(t => {
+      const tr = t.getBoundingClientRect(), gr = t.querySelector('.sale-photo-tag').getBoundingClientRect();
+      return gr.left < tr.left - 1 || gr.right > tr.right + 1;
+    }).length;
+  });
+  check(`at 667px every sale price tag fits its photo (${clipped} cut off)`, clipped === 0);
+  await pp.setViewportSize({ width: 390, height: 844 });
+  await pp.waitForTimeout(300);
   // Mock-up F: with a photo, the phone banner grows by at most 80px.
   const heights = await pp.evaluate(async () => {
     const h = () => document.querySelector('#heroTrack .hero-slide').getBoundingClientRect().height;

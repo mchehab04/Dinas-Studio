@@ -255,6 +255,12 @@
     .sale-photo-tag s, .sale-photo-now{ display:none; }
     .sale-photo-pct{ display:inline; }
   }
+  /* A phone turned sideways gets the desktop layout with tiles ~120px wide: the
+     two-price tag would be cut off, so it shows the percentage, as on a phone. */
+  @media (min-width:641px) and (max-width:760px){
+    .sale-photo-tag s, .sale-photo-now{ display:none; }
+    .sale-photo-pct{ display:inline; }
+  }
   @media (min-width:640px){ .hero h2{ max-width:420px; font-size:36px; } }
   @media (min-width:900px){ .hero h2{ max-width:560px; font-size:46px; } }
 

@@ -61,7 +61,10 @@ const ok = await get();
 const okBody = await ok.text();
 check('/ returns 200 html', ok.status === 200 && ok.headers.get('content-type').includes('text/html'));
 check('/ carries the saved headline', okBody.includes('<h1>From the route</h1>'));
-check('/ is cached for 5 minutes', /max-age=300/.test(ok.headers.get('cache-control')));
+// Exactly 5 minutes, as the spec and the admin's "within 5 minutes" toast say:
+// stale-while-revalidate would let a returning visitor see the old banner for
+// up to an hour.
+check(`/ is cached for 5 minutes, no longer (${ok.headers.get('cache-control')})`, ok.headers.get('cache-control') === 'public, max-age=300');
 check('/ reads only the banner columns of row 1',
   fetched[0].includes('shop_settings?id=eq.1') && fetched[0].includes('select=hero_eyebrow,hero_title,hero_text,hero_image'));
 
@@ -75,3 +78,16 @@ reply = { ok: true, body: [{}] };
 check('a row with no banner fields -> the default banner', (await (await get()).text()).includes('Wrapped in softness, styled with heart'));
 
 check('POST is rejected', (await get('POST')).status === 405);
+
+// Supabase hanging must not hang the home page: the read gives up after 1.5s
+// and the default banner is served. Without a time limit this never returns,
+// so the check races it against 4s.
+globalThis.fetch = (url, init = {}) => new Promise((_, reject) => {
+  if (init.signal) init.signal.addEventListener('abort', () => reject(new Error('aborted')));
+});
+const t0 = Date.now();
+const slow = await Promise.race([get(), new Promise(r => setTimeout(() => r(null), 4000))]);
+const slowBody = slow && await slow.text();
+check(`a hanging Supabase still serves the page, in ${Date.now() - t0}ms`, !!slow && slowBody === SHELL && Date.now() - t0 < 3000);
+check('and that page is not cached', !!slow && slow.headers.get('cache-control') === 'no-store');
+process.exit(0);   // the hanging stub above holds no timers once aborted, but leave nothing to chance
