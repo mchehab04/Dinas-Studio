@@ -32,7 +32,7 @@ Mock-ups approved in conversation: desktop split (text left, photo right, rose f
 
 - Headline: the owner's sale headline if set, otherwise today's automatic `Up to N% off selected pieces`.
 - Line under it: the existing sale banner line, unchanged.
-- Photos: up to three pieces from `PRODUCTS.filter(saleAvailable)` that have a photo, biggest discount first, then the default sort order. Desktop shows staggered cards with the struck old price and the sale price; phone shows them side by side across the top with a `−N%` tag, fading into rose like slide one.
+- Photos: up to three pieces from `PRODUCTS.filter(saleAvailable)` that have a photo, biggest discount first, then the default sort order. Desktop shows them side by side, flush, across the right ~60% at full banner height, with the photos themselves fading in from the left (a mask, so no seam against the rose), each tagged with the struck old price and the sale price; phone shows them side by side across the top with a `−N%` tag, fading into rose like slide one.
 - Its heading becomes an `<h2>`, so the page keeps a single `<h1>`. This fixes a deferred minor from the sale-pricing work.
 - No photos available (every sale piece is photo-less) → today's sale slide, text only.
 
