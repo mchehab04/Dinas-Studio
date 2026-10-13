@@ -106,6 +106,15 @@ Either order is genuinely safe. Before the SQL, products have no `discountPercen
 - **Access:** only the admin. The function checks the caller's Supabase session with `is_admin()` before calling Gemini.
 - **Free tier:** Google may use what is sent to improve its products; the photos are already public on the site.
 
+## Photo banners — built, waiting to be rolled out
+
+The Banners tab edits the main banner's small heading, headline, line and photo, and the sale banner's headline and line. The sale banner shows up to three of the pieces on sale, biggest discount first.
+
+- **Rollout:** run `supabase/banner-settings.sql`, then push. Either order is safe: before the SQL, `/` serves the default banner (the column read fails and the page is sent unchanged, uncached).
+- **Check:** `supabase/verify-banner-settings.sql` (rolls back; result rows say PASS/FAIL).
+- **How it is served:** `functions/index.js` → `lib/hero.js` writes slide one into `index.html` on `/` and `/p/`, cached 5 minutes. `public/js/app.js` mirrors the markup only to update the slide in place after a save; `BANNER_DEFAULTS` there and `HERO_DEFAULTS` in `lib/hero.js` must match.
+- **Photo:** stored in `product-images/banners/`, 1600px and 800px WebP. Subject on the right half: desktop crops from the right, phone shows the top strip.
+
 ## Remaining concerns after that
 
 | Item | Notes |
