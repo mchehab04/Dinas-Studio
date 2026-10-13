@@ -42,7 +42,10 @@ const gemini = () => calls.find(c => c.url.includes('generativelanguage'));
 check('GET rejected 405', (await handle(req(null, { method: 'GET' }), env)).status === 405);
 reset();
 const { GEMINI_API_KEY, ...noKey } = env;
-check('no Gemini key -> 500', (await handle(req(good), noKey)).status === 500);
+// Every failure is a 4xx: Cloudflare replaces a function's 5xx body with its
+// own HTML error page, which hid Google's reason from the admin entirely.
+const unset = await handle(req(good), noKey);
+check('no Gemini key -> 424, saying what is missing', unset.status === 424 && (await unset.text()).includes('GEMINI_API_KEY'));
 check('nothing is called while misconfigured', calls.length === 0);
 
 reset();
@@ -101,17 +104,17 @@ check('Gemini over its limit -> 429 passed on', limited.status === 429);
 check('and says to try later', /try again later/i.test(await limited.text()));
 
 reset(); geminiStatus = 500; geminiReply = { error: { message: 'boom' } };
-check('a Gemini error -> 502', (await handle(req(good), env)).status === 502);
+check('a Gemini error -> 424, not a 5xx', (await handle(req(good), env)).status === 424);
 
 // Google's own reason reaches the admin's toast, so a bad key or a retired
 // model says so instead of a bare status code.
 reset(); geminiStatus = 400; geminiReply = { error: { code: 400, message: 'API key not valid. Please pass a valid API key.', status: 'INVALID_ARGUMENT' } };
 const badKey = await handle(req(good), env);
 const badKeyText = await badKey.text();
-check(`a rejected key says why ("${badKeyText}")`, badKey.status === 502 && badKeyText.includes('API key not valid'));
+check(`a rejected key says why ("${badKeyText}")`, badKey.status === 424 && badKeyText.includes('API key not valid'));
 check('without echoing the key itself', !badKeyText.includes('gem-key'));
 reset(); geminiStatus = 404; geminiReply = { error: { code: 404, message: 'models/gemini-x is not found for API version v1beta', status: 'NOT_FOUND' } };
 check('a retired model says which', (await (await handle(req(good), env)).text()).includes('gemini-x is not found'));
 
 reset(); geminiReply = { candidates: [{ content: { parts: [] } }] };
-check('an empty answer -> 502', (await handle(req(good), env)).status === 502);
+check('an empty answer -> 424', (await handle(req(good), env)).status === 424);

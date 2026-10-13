@@ -1217,6 +1217,10 @@ button:disabled {
 .sale-input{ width:76px; padding:6px 10px; font-size:12.5px; }
 .sale-input.invalid{ border-color:var(--danger); }
 .desc-input{ flex:1 1 100%; font-size:12.5px; line-height:1.5; resize:vertical; }
+.details-form{ flex:1 1 100%; display:flex; flex-direction:column; gap:4px; }
+.details-form .form-label{ margin-top:6px; }
+.details-form .form-row-2{ gap:10px; }
+.details-actions{ display:flex; flex-wrap:wrap; gap:6px; margin-top:8px; }
 .sale-note-row{ display:flex; gap:8px; align-items:center; flex-wrap:wrap; margin-bottom:14px; }
 /* In the inventory's "Category • price" line the struck price stays inline:
    as a block it broke the line and left the bullet dangling. It carries no

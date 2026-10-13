@@ -233,18 +233,10 @@ const apiService = {
   },
   // 0 clears the sale. Clamped here as well as refused by the editor, and the
   // database's check constraint refuses anything outside 0-90 regardless.
-  async updateProductPrice(id, price) {
+  // name, cat, price, fabric and desc, written together from Edit details.
+  async updateProductDetails(id, fields) {
     const { data, error } = await supabaseClient
-      .from('products').update({ price }).eq('id', id).select().single();
-    if(error) { console.error(error); return null; }
-    const idx = PRODUCTS.findIndex(x => x.id === id);
-    if(idx !== -1) PRODUCTS[idx] = data;
-    storageService.saveProducts(PRODUCTS);
-    return data;
-  },
-  async updateProductDesc(id, desc) {
-    const { data, error } = await supabaseClient
-      .from('products').update({ desc }).eq('id', id).select().single();
+      .from('products').update(fields).eq('id', id).select().single();
     if(error) { console.error(error); return null; }
     const idx = PRODUCTS.findIndex(x => x.id === id);
     if(idx !== -1) PRODUCTS[idx] = data;
@@ -2169,8 +2161,7 @@ async function renderAdmin() {
               <button class="stock-toggle-btn ${p.stock==='low'?'active-low':''}" onclick="setProductStock(${p.id}, 'low')">Low</button>
               <button class="stock-toggle-btn ${p.stock==='out'?'active-out':''}" onclick="setProductStock(${p.id}, 'out')">Sold Out</button>
               <button class="stock-toggle-btn" onclick="openPhotoEditor(${p.id})">Photos (${(p.images||[]).length})</button>
-              <button class="stock-toggle-btn" onclick="openDescEditor(${p.id})">Description</button>
-              <button class="stock-toggle-btn" onclick="openPriceEditor(${p.id})">Price</button>
+              <button class="stock-toggle-btn" onclick="openDetailsEditor(${p.id})">Edit details</button>
               <button class="stock-toggle-btn ${isOnSale(p) ? 'sale-set' : ''}" onclick="openSaleEditor(${p.id})">${isOnSale(p) ? `Sale ${discountOf(p)}%` : 'Sale'}</button>
               ${waiting.filter(r => r.product_id === p.id).length ? `
                 <button class="stock-toggle-btn waiting-btn" onclick="openWaitingList(${p.id})">
@@ -2362,58 +2353,70 @@ function validPrice(v){
   const t = String(v).trim();
   return /^[0-9]{1,5}(\.[0-9]{1,2})?$/.test(t) && Number(t) > 0;
 }
-function openPriceEditor(productId){
+// Every piece's details in one form, opened in its inventory row: name,
+// category, price, fabric and description, saved together. Save stays
+// disabled until each is valid. The category list is the shop's own, so a
+// piece can never land in a category the shop has no filter for.
+const DETAIL_FIELDS = ['editName', 'editCat', 'editPrice', 'editFabric', 'editDesc'];
+function detailsValid(id){
+  const v = f => (document.getElementById(f + id) || {}).value || '';
+  return !!v('editName').trim() && CATEGORIES.includes(v('editCat')) && v('editCat') !== 'All' &&
+         validPrice(v('editPrice')) && !!v('editDesc').trim();
+}
+function openDetailsEditor(productId){
   const p = PRODUCTS.find(x => x.id === productId);
   const row = document.getElementById('invRow' + productId);
   if(!p || !row) return;
+  const cats = CATEGORIES.filter(c => c !== 'All');
   row.innerHTML = `
-    <input class="form-input sale-input" id="priceInput${productId}" type="text" inputmode="decimal"
-           value="${p.price}" placeholder="AED" maxlength="8" aria-label="Price in AED" style="width:96px;">
-    <button class="stock-toggle-btn" id="priceSave${productId}" onclick="savePriceEditor(${productId})">Save</button>
-    <button class="stock-toggle-btn" onclick="renderAdmin()">Cancel</button>`;
-  const input = document.getElementById('priceInput' + productId);
-  const save = document.getElementById('priceSave' + productId);
+    <div class="details-form">
+      <label class="form-label" for="editName${productId}">Name</label>
+      <input class="form-input" id="editName${productId}" maxlength="80" value="${escHtml(p.name)}">
+      <div class="form-row-2">
+        <div>
+          <label class="form-label" for="editCat${productId}">Category</label>
+          <select class="form-select" id="editCat${productId}">
+            ${cats.map(c => `<option value="${c}" ${p.cat === c ? 'selected' : ''}>${c}</option>`).join('')}
+          </select>
+        </div>
+        <div>
+          <label class="form-label" for="editPrice${productId}">Price (AED)</label>
+          <input class="form-input" id="editPrice${productId}" type="text" inputmode="decimal" maxlength="8" value="${p.price}">
+        </div>
+      </div>
+      <label class="form-label" for="editFabric${productId}">Fabric</label>
+      <input class="form-input" id="editFabric${productId}" maxlength="80" value="${escHtml(p.fabric || '')}">
+      <label class="form-label" for="editDesc${productId}">Description</label>
+      <textarea class="form-input desc-input" id="editDesc${productId}" rows="4" maxlength="600">${escHtml(p.desc)}</textarea>
+      <div class="details-actions">
+        <button class="stock-toggle-btn" id="editSave${productId}" onclick="saveDetailsEditor(${productId})">Save</button>
+        <button class="stock-toggle-btn" onclick="renderAdmin()">Cancel</button>
+        <button class="stock-toggle-btn ai-btn" id="editAi${productId}" onclick="aiFillDesc(${productId})">Write with AI</button>
+      </div>
+    </div>`;
+  const save = document.getElementById('editSave' + productId);
   const refresh = () => {
-    const ok = validPrice(input.value);
-    save.disabled = !ok;
-    input.classList.toggle('invalid', !ok && input.value.trim() !== '');
+    save.disabled = !detailsValid(productId);
+    const price = document.getElementById('editPrice' + productId);
+    price.classList.toggle('invalid', !validPrice(price.value) && price.value.trim() !== '');
   };
-  input.addEventListener('input', refresh);
-  input.addEventListener('keydown', e => {
-    if(e.key === 'Enter'){ e.preventDefault(); if(validPrice(input.value)) savePriceEditor(productId); }
-    if(e.key === 'Escape') renderAdmin();
+  DETAIL_FIELDS.forEach(f => {
+    const el = document.getElementById(f + productId);
+    el.addEventListener('input', refresh);
+    el.addEventListener('change', refresh);
+    el.addEventListener('keydown', e => { if(e.key === 'Escape') renderAdmin(); });
   });
   refresh();
-  input.focus();
+  document.getElementById('editName' + productId).focus();
 }
-async function savePriceEditor(productId){
-  const input = document.getElementById('priceInput' + productId);
-  if(!input || !validPrice(input.value)){ showToast('Enter a price in AED, like 450'); return; }
-  const price = Number(input.value.trim());
-  const updated = await apiService.updateProductPrice(productId, price);
-  showToast(updated ? `"${updated.name}" is now AED ${price} ✓` : "Couldn't save that — please try again");
+async function saveDetailsEditor(productId){
+  if(!detailsValid(productId)){ showToast('Fill in a name, a price and a description'); return; }
+  const v = f => document.getElementById(f + productId).value.trim();
+  const updated = await apiService.updateProductDetails(productId, {
+    name: v('editName'), cat: v('editCat'), price: Number(v('editPrice')), fabric: v('editFabric'), desc: v('editDesc')
+  });
+  showToast(updated ? `Saved "${updated.name}" ✓` : "Couldn't save that — please try again");
   await afterSaleChange(productId);
-}
-
-// Opens in the row's button area, like the sale editor. Save stays disabled
-// while the text is blank.
-function openDescEditor(productId){
-  const p = PRODUCTS.find(x => x.id === productId);
-  const row = document.getElementById('invRow' + productId);
-  if(!p || !row) return;
-  row.innerHTML = `
-    <textarea class="form-input desc-input" id="descInput${productId}" rows="4" maxlength="600"
-              aria-label="Description">${escHtml(p.desc)}</textarea>
-    <button class="stock-toggle-btn" id="descSave${productId}" onclick="saveDescEditor(${productId})">Save</button>
-    <button class="stock-toggle-btn" onclick="renderAdmin()">Cancel</button>
-    <button class="stock-toggle-btn ai-btn" id="descAi${productId}" onclick="aiFillDesc(${productId})">Write with AI</button>`;
-  const box = document.getElementById('descInput' + productId);
-  const save = document.getElementById('descSave' + productId);
-  const refresh = () => { save.disabled = !box.value.trim(); };
-  box.addEventListener('input', refresh);
-  box.addEventListener('keydown', e => { if(e.key === 'Escape') renderAdmin(); });
-  refresh();
-  box.focus();
 }
 
 // Asks /api/describe (Gemini) for a draft from the piece's details and up to
@@ -2444,13 +2447,15 @@ async function draftDescription({ name, cat, fabric, photos }){
       body: JSON.stringify({ name, cat, fabric, images })
     });
     if(!res.ok){
-      showToast(res.status === 500 ? 'AI descriptions are not set up yet' : (await res.text()) || 'Could not write a description');
+      // A Cloudflare error page arrives as HTML; say what happened instead.
+      const msg = (await res.text()).trim();
+      showToast(!msg || msg.startsWith('<') ? `Server error ${res.status} — please try again` : msg, 8000);
       return null;
     }
     return (await res.json()).text;
   } catch(e){
     console.error(e);
-    showToast('Could not write a description — please try again');
+    showToast('Could not write a description — please try again', 8000);
     return null;
   }
 }
@@ -2472,22 +2477,14 @@ async function fillWithDraft(box, btn, details){
 function aiFillDesc(productId){
   const p = PRODUCTS.find(x => x.id === productId);
   if(!p) return;
-  return fillWithDraft(document.getElementById('descInput' + productId), document.getElementById('descAi' + productId),
-    { name: p.name, cat: p.cat, fabric: p.fabric || '', photos: p.images || [] });
+  const v = f => ((document.getElementById(f + productId) || {}).value || '').trim();
+  return fillWithDraft(document.getElementById('editDesc' + productId), document.getElementById('editAi' + productId),
+    { name: v('editName'), cat: v('editCat'), fabric: v('editFabric'), photos: p.images || [] });
 }
 function aiFillNewDesc(){
   const val = id => ((document.getElementById(id) || {}).value || '').trim();
   return fillWithDraft(document.getElementById('npDesc'), document.getElementById('npAi'),
     { name: val('npName'), cat: val('npCat'), fabric: val('npFabric'), photos: photoDraft.map(i => i.file || i.url).filter(Boolean) });
-}
-
-async function saveDescEditor(productId){
-  const box = document.getElementById('descInput' + productId);
-  const desc = box ? box.value.trim() : '';
-  if(!desc){ showToast('Enter a description'); return; }
-  const updated = await apiService.updateProductDesc(productId, desc);
-  showToast(updated ? `Description saved for "${updated.name}" ✓` : "Couldn't save that — please try again");
-  await afterSaleChange(productId);
 }
 
 async function saveSaleEditor(productId){
@@ -2657,13 +2654,14 @@ function emptyState(title, sub){
 }
 
 let toastTimer;
-function showToast(msg){
+// Errors worth reading in full pass a longer duration.
+function showToast(msg, ms = 2200){
   const t = document.getElementById('toast');
   if(!t) return;
   t.textContent = msg;
   t.classList.add('show');
   clearTimeout(toastTimer);
-  toastTimer = setTimeout(()=>t.classList.remove('show'), 2200);
+  toastTimer = setTimeout(()=>t.classList.remove('show'), ms);
 }
 
 /* ========================= INIT ========================= */

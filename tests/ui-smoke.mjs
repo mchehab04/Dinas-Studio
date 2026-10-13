@@ -1016,93 +1016,80 @@ const oneFilter = await page.evaluate(() => {
 }).catch(e => ({ error: e.message }));
 if (oneFilter.error) console.log('single-filter checks unavailable:', String(oneFilter.error).slice(0, 160));
 const same = (a, b) => JSON.stringify(a) === JSON.stringify(b);
+const CATEGORIES_FOR_TEST = ['Matching Sets', 'Abayas', 'Kimonos'];
 check(`In Stock alone (${oneFilter.a})`, same(oneFilter.a, ['In Stock']));
 check(`Notify Me replaces it (${oneFilter.b})`, same(oneFilter.b, ['Notify Me']));
 check(`On Sale replaces that (${oneFilter.c})`, same(oneFilter.c, ['On Sale']));
 check(`In Stock replaces On Sale (${oneFilter.d})`, same(oneFilter.d, ['In Stock']));
 check('tapping the active chip clears it', same(oneFilter.e, []));
 
-// A piece's description can be edited from its inventory row.
-const descEdit = await page.evaluate(async () => {
-  const realFrom = supabaseClient.from;
-  const realOrders = apiService.getOrders, realReqs = apiService.getRestockRequests;
-  apiService.getOrders = async () => []; apiService.getRestockRequests = async () => [];
-  const target = PRODUCTS[0];
-  const savedDesc = target.desc;
-  let written = null;
-  supabaseClient.from = () => ({ v: null,
-    update(v){ this.v = v; return this; }, eq(){ return this; }, select(){ return this; },
-    single: async function(){ written = this.v; return { data: { ...target, ...this.v }, error: null }; } });
-  adminTab = 'inventory'; await renderAdmin();
-  const res = { hasButton: !!document.querySelector(`#invRow${target.id} [onclick^="openDescEditor"]`) };
-  openDescEditor(target.id);
-  const box = document.getElementById('descInput' + target.id);
-  const save = document.getElementById('descSave' + target.id);
-  res.prefilled = box && box.value === savedDesc;
-  box.value = '   '; box.dispatchEvent(new Event('input'));
-  res.emptyDisabled = save.disabled;
-  box.value = 'A new <b>description</b>'; box.dispatchEvent(new Event('input'));
-  res.editedEnabled = !save.disabled;
-  await saveDescEditor(target.id);
-  res.written = written && written.desc;
-  res.local = (PRODUCTS.find(p => p.id === target.id) || {}).desc;
-  supabaseClient.from = realFrom; apiService.getOrders = realOrders; apiService.getRestockRequests = realReqs;
-  PRODUCTS.find(p => p.id === target.id).desc = savedDesc;
-  closeAllSheets({ keepUrl: true });
-  return res;
-}).catch(e => ({ error: e.message }));
-if (descEdit.error) console.log('description editor unavailable:', String(descEdit.error).slice(0, 160));
-check('each inventory row has a Description button', descEdit.hasButton === true);
-check('the editor opens with the current description', descEdit.prefilled === true);
-check('Save is disabled for a blank description', descEdit.emptyDisabled === true);
-check('and enabled once something is typed', descEdit.editedEnabled === true);
-check(`saving writes the new text ("${descEdit.written}")`, descEdit.written === 'A new <b>description</b>');
-check('and the shop shows it without a reload', descEdit.local === 'A new <b>description</b>');
-
-// The price can be edited from the inventory row, in AED.
-const priceEdit = await page.evaluate(async () => {
+// One "Edit details" form per piece: name, category, price, fabric and
+// description, saved together. Save stays disabled until every field is valid.
+const details = await page.evaluate(async () => {
   const realFrom = supabaseClient.from;
   const realOrders = apiService.getOrders, realReqs = apiService.getRestockRequests;
   apiService.getOrders = async () => []; apiService.getRestockRequests = async () => [];
   const target = PRODUCTS.find(p => p.stock !== 'out');
-  const saved = target.price;
-  let written = null;
+  const saved = { ...target };
+  let written = null, writes = 0;
   supabaseClient.from = () => ({ v: null,
     update(v){ this.v = v; return this; }, eq(){ return this; }, select(){ return this; },
-    single: async function(){ written = this.v; return { data: { ...PRODUCTS.find(p => p.id === target.id), ...this.v }, error: null }; } });
+    single: async function(){ writes++; written = this.v; return { data: { ...PRODUCTS.find(p => p.id === target.id), ...this.v }, error: null }; } });
   const res = {};
   try {
     adminTab = 'inventory'; await renderAdmin();
-    res.hasButton = !!document.querySelector(`#invRow${target.id} [onclick^="openPriceEditor"]`);
-    openPriceEditor(target.id);
-    const input = document.getElementById('priceInput' + target.id);
-    const save = document.getElementById('priceSave' + target.id);
-    res.prefilled = input && Number(input.value) === Number(saved);
-    const disabledFor = v => { input.value = v; input.dispatchEvent(new Event('input')); return save.disabled; };
-    res.rejects = ['', '0', '-5', 'abc', '12.345', '100000'].map(v => [v, disabledFor(v)]);
-    res.accepts = ['450', '199.5'].map(v => [v, !disabledFor(v)]);
-    disabledFor('450');
-    await savePriceEditor(target.id);
-    res.written = written && written.price;
-    res.local = PRODUCTS.find(p => p.id === target.id).price;
-    res.rowShows = (document.getElementById('adminContent').innerText || '').includes('AED 450');
+    const row = () => document.getElementById('invRow' + target.id);
+    const labels = [...row().querySelectorAll('button')].map(b => b.textContent.trim());
+    res.hasEdit = labels.includes('Edit details');
+    res.oldButtonsGone = !labels.includes('Description') && !labels.includes('Price');
+    openDetailsEditor(target.id);
+    const f = id => document.getElementById(id + target.id);
+    res.prefilled = f('editName').value === target.name && f('editCat').value === target.cat &&
+      Number(f('editPrice').value) === Number(target.price) && f('editFabric').value === (target.fabric || '') &&
+      f('editDesc').value === target.desc;
+    res.cats = [...f('editCat').options].map(o => o.value);
+    const save = f('editSave');
+    const set = (id, v) => { f(id).value = v; f(id).dispatchEvent(new Event('input', { bubbles: true })); f(id).dispatchEvent(new Event('change', { bubbles: true })); };
+    const blocked = (id, bad, good) => { set(id, bad); const d = save.disabled; set(id, good); return d; };
+    res.blocks = {
+      blankName: blocked('editName', '  ', target.name),
+      blankDesc: blocked('editDesc', ' ', target.desc),
+      zeroPrice: blocked('editPrice', '0', String(target.price)),
+      textPrice: blocked('editPrice', 'abc', String(target.price)),
+      threeDecimals: blocked('editPrice', '12.345', String(target.price)),
+      tooBig: blocked('editPrice', '100000', String(target.price))
+    };
+    set('editName', 'Renamed Piece'); set('editCat', 'Abayas'); set('editPrice', '199.5');
+    set('editFabric', 'Crepe'); set('editDesc', 'A new <b>description</b>');
+    res.enabled = !save.disabled;
+    await saveDetailsEditor(target.id);
+    res.writes = writes;
+    res.written = written;
+    const now = PRODUCTS.find(p => p.id === target.id);
+    res.local = { name: now.name, cat: now.cat, price: now.price, fabric: now.fabric, desc: now.desc };
+    res.rowText = document.getElementById('adminContent').innerText;
   } finally {
     supabaseClient.from = realFrom; apiService.getOrders = realOrders; apiService.getRestockRequests = realReqs;
-    PRODUCTS.find(p => p.id === target.id).price = saved;
-    lastGridSignature = null; renderGrid(); closeAllSheets({ keepUrl: true });
+    Object.assign(PRODUCTS.find(p => p.id === target.id), saved);
+    lastGridSignature = null; renderGrid(); renderFilterPanel(); closeAllSheets({ keepUrl: true });
   }
   return res;
 }).catch(e => ({ error: e.message }));
-if (priceEdit.error) console.log('price editor unavailable:', String(priceEdit.error).slice(0, 160));
-check('each inventory row has a Price button', priceEdit.hasButton === true);
-check('the editor opens with the current price', priceEdit.prefilled === true);
-check(`Save is disabled for blank, zero, negative, text, 3 decimals or 100000 (${JSON.stringify(priceEdit.rejects)})`,
-  Array.isArray(priceEdit.rejects) && priceEdit.rejects.every(([, d]) => d === true));
-check(`and enabled for 450 and 199.5 (${JSON.stringify(priceEdit.accepts)})`,
-  Array.isArray(priceEdit.accepts) && priceEdit.accepts.every(([, ok]) => ok === true));
-check(`saving writes the price as a number (${priceEdit.written})`, priceEdit.written === 450);
-check('the shop uses it without a reload', priceEdit.local === 450);
-check('and the inventory row shows it', priceEdit.rowShows === true);
+if (details.error) console.log('details editor unavailable:', String(details.error).slice(0, 200));
+check('each inventory row has an Edit details button', details.hasEdit === true);
+check('which replaces the separate Description and Price buttons', details.oldButtonsGone === true);
+check('the form opens with the piece as it is now', details.prefilled === true);
+check(`the category list is the shop's (${(details.cats || []).join(', ')})`,
+  JSON.stringify(details.cats) === JSON.stringify(CATEGORIES_FOR_TEST));
+check(`Save is blocked for a blank name or description, or a bad price (${JSON.stringify(details.blocks)})`,
+  !!details.blocks && Object.values(details.blocks).every(v => v === true));
+check('and enabled when every field is valid', details.enabled === true);
+check('saving writes all five fields in one update', details.writes === 1 && !!details.written &&
+  details.written.name === 'Renamed Piece' && details.written.cat === 'Abayas' && details.written.price === 199.5 &&
+  details.written.fabric === 'Crepe' && details.written.desc === 'A new <b>description</b>');
+check('the shop uses them without a reload', !!details.local && details.local.name === 'Renamed Piece' && details.local.cat === 'Abayas' && details.local.price === 199.5);
+check('and the inventory row shows the new name, category and price',
+  /Renamed Piece/.test(details.rowText || '') && /Abayas/.test(details.rowText || '') && /AED 199\.5/.test(details.rowText || ''));
 
 // "Write with AI" drafts a description through /api/describe and only fills
 // the box: nothing is saved until the admin presses Save.
@@ -1120,12 +1107,12 @@ const aiDesc = await page.evaluate(async () => {
   try {
     const target = PRODUCTS.find(p => (p.images || []).length > 0);
     adminTab = 'inventory'; await renderAdmin();
-    openDescEditor(target.id);
-    const box = document.getElementById('descInput' + target.id);
+    openDetailsEditor(target.id);
+    const box = document.getElementById('editDesc' + target.id);
     const before = box.value;
     await aiFillDesc(target.id);
     res.filled = box.value;
-    res.saveEnabled = !document.getElementById('descSave' + target.id).disabled;
+    res.saveEnabled = !document.getElementById('editSave' + target.id).disabled;
     res.notSaved = PRODUCTS.find(p => p.id === target.id).desc === before;
     const s = sent[0] || { body: {}, init: { headers: {} } };
     res.auth = s.init.headers.Authorization;
@@ -1138,6 +1125,13 @@ const aiDesc = await page.evaluate(async () => {
     box.value = 'kept'; await aiFillDesc(target.id);
     res.keptOnError = box.value === 'kept';
     res.errorToast = document.getElementById('toast').textContent;
+    await new Promise(r => setTimeout(r, 3000));
+    res.errorStillShown = document.getElementById('toast').classList.contains('show');
+
+    // Cloudflare's own HTML error page is never dumped into the toast.
+    reply = { status: 502, body: '<!DOCTYPE html><html><body><a href="https://www.cloudflare.com/5xx-error-landing">x</a></body></html>' };
+    await aiFillDesc(target.id);
+    res.htmlToast = document.getElementById('toast').textContent;
 
     // A photo that won't load is skipped; the draft still goes ahead.
     reply = { status: 200, body: JSON.stringify({ text: 'Drafted without one photo.' }) };
@@ -1173,6 +1167,8 @@ check('and the piece\'s name', aiDesc.name === true);
 check(`and its photos, shrunk to WebP (${aiDesc.photoCount} of ${aiDesc.expectPhotos})`, aiDesc.photoCount === aiDesc.expectPhotos && aiDesc.webp === true);
 check('an error leaves the text as it was', aiDesc.keptOnError === true);
 check(`and says why ("${aiDesc.errorToast}")`, /try again later/i.test(aiDesc.errorToast || ''));
+check('and stays up long enough to read', aiDesc.errorStillShown === true);
+check(`an HTML error page is not shown as code ("${aiDesc.htmlToast}")`, !!aiDesc.htmlToast && !/</.test(aiDesc.htmlToast) && /502/.test(aiDesc.htmlToast));
 check('a photo that won\'t load is skipped, not fatal', aiDesc.skippedBroken === true);
 check('Add Piece asks for a name before drafting', aiDesc.noNameBlocked === true);
 check(`and then fills its description ("${aiDesc.addFilled}")`, aiDesc.addFilled === 'A new piece, drafted.' && aiDesc.addSentName === 'Test Abaya');
