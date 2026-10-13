@@ -30,7 +30,7 @@ Mock-ups approved in conversation: desktop split (text left, photo right, rose f
 
 ### Sale banner (slide two, only while something is on sale and buyable)
 
-- Headline: the owner's sale headline if set, otherwise today's automatic `Up to N% off selected pieces`.
+- Headline: the owner's sale headline if set, otherwise today's automatic `Up to N% off selected pieces`, with "selected pieces" kept together so it breaks as `Up to N% off` / `selected pieces` on phone and desktop. A custom headline is balanced across its lines (`text-wrap: balance`).
 - Line under it: the existing sale banner line, unchanged.
 - Photos: up to three pieces from `PRODUCTS.filter(saleAvailable)` that have a photo, biggest discount first, then the default sort order. Desktop shows them side by side, flush, across the right ~60% at full banner height, with the photos themselves fading in from the left (a mask, so no seam against the rose), each tagged with the struck old price and the sale price; phone shows them side by side across the top with a `−N%` tag, fading into rose like slide one.
 - Its heading becomes an `<h2>`, so the page keeps a single `<h1>`. This fixes a deferred minor from the sale-pricing work.
