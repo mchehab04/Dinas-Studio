@@ -205,6 +205,58 @@
     box-shadow: 0 8px 20px rgba(0,0,0,0.15);
   }
 
+  /* ----- Banner photos -----
+     Slide one with the owner's photo, and the sale slide with the pieces on
+     sale. Desktop: the copy keeps the left; the photos take the right 60% and
+     fade in through a mask, so there is no seam against the rose gradient.
+     Phone: the photos run across the top and fade into the rose; the copy sits
+     below, never over the busy part of the picture. */
+  .hero h2{
+    color:#fff; font-size:32px; line-height:1.08; margin-top:4px;
+    position:relative; z-index:2; max-width:280px; text-wrap:balance;
+  }
+  .nowrap{ white-space:nowrap; }
+  .hero-copy{ position:relative; z-index:2; }
+  .hero-photo, .sale-photos{
+    position:absolute; top:0; right:0; bottom:0; width:60%;
+    -webkit-mask-image:linear-gradient(90deg, transparent 0%, #000 26%);
+            mask-image:linear-gradient(90deg, transparent 0%, #000 26%);
+  }
+  .hero-photo{ height:100%; object-fit:cover; object-position:right center; }
+  .hero-slide.has-photo:before, .hero-slide.has-photo:after,
+  .hero-sale.has-photos:before, .hero-sale.has-photos:after{ display:none; }
+  .hero-slide.has-photo .hero-copy, .hero-sale.has-photos .hero-copy{ max-width:44%; }
+  .sale-photos{ display:flex; }
+  .sale-photo{ position:relative; flex:1; overflow:hidden; display:block; }
+  .sale-photo + .sale-photo{ border-left:2px solid rgba(255,255,255,.45); }
+  .sale-photo img{ position:absolute; inset:0; width:100%; height:100%; object-fit:cover; object-position:center 20%; }
+  .sale-photo-tag{
+    position:absolute; right:10px; bottom:12px; z-index:2; background:#fff; color:var(--primary);
+    font-weight:800; font-size:12px; padding:4px 9px; border-radius:10px; white-space:nowrap;
+  }
+  .sale-photo-tag s{ color:var(--ink-soft); font-weight:600; }
+  .sale-photo-pct{ display:none; }
+  @media (max-width:640px){
+    .hero-slide.has-photo, .hero-sale.has-photos{
+      padding:0 20px 20px;
+      background:linear-gradient(180deg, var(--primary) 0%, var(--primary) 40%, var(--primary-tint) 80%, var(--accent-deep) 100%);
+    }
+    .hero-photo, .sale-photos{
+      position:relative; display:block; width:auto; height:175px; margin:0 -20px -26px;
+      -webkit-mask-image:linear-gradient(180deg, #000 45%, transparent 100%);
+              mask-image:linear-gradient(180deg, #000 45%, transparent 100%);
+    }
+    .hero-photo{ width:calc(100% + 40px); }
+    .sale-photos{ display:flex; }
+    .hero-slide.has-photo .hero-copy, .hero-sale.has-photos .hero-copy{ max-width:none; }
+    .hero-slide.has-photo h1, .hero-sale.has-photos h2{ font-size:26px; line-height:1.15; max-width:none; }
+    .sale-photo-tag{ top:8px; left:8px; right:auto; bottom:auto; font-size:11px; padding:3px 7px; }
+    .sale-photo-tag s, .sale-photo-now{ display:none; }
+    .sale-photo-pct{ display:inline; }
+  }
+  @media (min-width:640px){ .hero h2{ max-width:420px; font-size:36px; } }
+  @media (min-width:900px){ .hero h2{ max-width:560px; font-size:46px; } }
+
   /* ===== Scalloped divider ===== */
   .scallop{
     height:16px;

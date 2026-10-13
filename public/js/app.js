@@ -583,26 +583,56 @@ function onSearchInput(){
 
 /* ========================= HERO ========================= */
 let saleNoteText = '';
+let saleTitleText = '';   // the owner's sale headline; '' means the automatic one
 let heroTimer = null;
 let heroIndex = 0;
 
 const HERO_ARROW = `<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3"><path d="M5 12h14M13 6l6 6-6 6"/></svg>`;
 
+// Up to three pieces to show on the sale slide: on sale, buyable and with a
+// photo, biggest discount first. Ties keep the shop's own order.
+function salePicks(){
+  return PRODUCTS.filter(p => saleAvailable(p) && (p.images || []).length)
+    .map((p, i) => ({ p, i }))
+    .sort((x, y) => discountOf(y.p) - discountOf(x.p) || x.i - y.i)
+    .slice(0, 3).map(x => x.p);
+}
+
 // The sale slide is generated from the pieces on sale, so it can never
 // advertise a discount that is not actually available. It reads saleAvailable,
 // the same definition the On Sale filter uses, so the button on this slide
 // always opens a filter showing what the headline promised. '' when nothing
-// is on sale.
+// is on sale. Its heading is an <h2>: slide one's <h1> is the page's headline.
 function saleSlide(){
   const onSale = PRODUCTS.filter(saleAvailable);
   if(!onSale.length) return '';
   const top = Math.max(...onSale.map(discountOf));
+  const title = saleTitleText
+    ? escHtml(saleTitleText)
+    // Both halves held together, so the only break is the approved one:
+    // "Up to N% off" / "selected pieces". Balancing alone picks "Up to N%" /
+    // "off selected pieces" on a phone.
+    : `<span class="nowrap">Up to ${top}% off</span> <span class="nowrap">selected pieces</span>`;
+  const picks = salePicks();
+  const photos = picks.length ? `
+      <div class="sale-photos">
+        ${picks.map(p => {
+          const src = p.images[0], sm = smallVariant(src);
+          return `<a class="sale-photo" data-id="${p.id}" href="${productPath(p)}" onclick="event.preventDefault(); openProduct(${p.id});" aria-label="${escHtml(p.name)}">
+            <img src="${sm || src}" alt="" loading="lazy">
+            <span class="sale-photo-tag"><s>AED ${p.price}</s> <span class="sale-photo-now">AED ${chargedPrice(p)}</span><span class="sale-photo-pct">−${discountOf(p)}%</span></span>
+          </a>`;
+        }).join('')}
+      </div>` : '';
   return `
-    <div class="hero hero-slide hero-sale">
+    <div class="hero hero-slide hero-sale${picks.length ? ' has-photos' : ''}">
+      ${photos}
+      <div class="hero-copy">
       <div class="eyebrow">sale</div>
-      <h1>Up to ${top}% off selected pieces</h1>
+      <h2>${title}</h2>
       ${saleNoteText ? `<p>${escHtml(saleNoteText)}</p>` : ''}
       <button class="hero-cta" onclick="shopFromHero(true)">Shop the sale ${HERO_ARROW}</button>
+      </div>
     </div>`;
 }
 

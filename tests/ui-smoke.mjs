@@ -515,7 +515,8 @@ const hero = await page.evaluate(async () => {
     slides: document.querySelectorAll('.hero-slide').length,
     dots: document.querySelectorAll('.hero-dot').length,
     text,
-    noteInjected: document.querySelectorAll('.hero-carousel img').length,
+    // The sale slide now carries piece photos; only an injected image counts.
+    noteInjected: document.querySelectorAll('.hero-carousel img[onerror], .hero-carousel img[src="x"]').length,
     pwned: window.__heroPwned,
     sideways: document.documentElement.scrollWidth > window.innerWidth
   };
@@ -544,6 +545,77 @@ check('the note is shown', /Ends Sunday/.test(hs.text || ''));
 check('the note cannot inject markup', hs.noteInjected === 0 && hs.pwned === 0);
 check('a running sale does not make the page scroll sideways', hs.sideways === false);
 check('"Shop the sale" switches the On Sale filter on', hero.filterOn === true);
+
+// The sale slide shows the pieces themselves: up to three with a photo, biggest
+// discount first. The owner can name the sale; otherwise the automatic headline
+// keeps "selected pieces" together. Its heading is an <h2>: one <h1> per banner.
+const salePhotos = await page.evaluate(async () => {
+  const saved = PRODUCTS.map(p => ({ d: p.discountPercent, s: p.stock, i: p.images }));
+  const savedTitle = saleTitleText;
+  const withPhoto = PRODUCTS.filter(p => (p.images || []).length);
+  const res = {};
+  try {
+    PRODUCTS.forEach(p => { p.discountPercent = 0; p.stock = 'in'; });
+    const [a, b, c, d] = withPhoto;
+    a.discountPercent = 10; b.discountPercent = 30; c.discountPercent = 20; d.discountPercent = 25;
+    const noPhoto = PRODUCTS.find(p => !withPhoto.includes(p)) || null;
+    if (noPhoto) noPhoto.discountPercent = 40;   // biggest discount, but no photo
+    saleTitleText = '';
+    renderHero();
+    const slide = () => document.querySelector('.hero-sale');
+    const tiles = () => [...slide().querySelectorAll('.sale-photo')];
+    res.count = tiles().length;
+    res.order = tiles().map(t => t.dataset.id).join(',');
+    res.want = [b, d, c].map(p => String(p.id)).join(',');
+    res.tag = tiles()[0].querySelector('.sale-photo-tag').textContent.replace(/\s+/g, ' ').trim();
+    res.wantTag = `AED ${chargedPrice(b)}`;
+    res.h2 = !!slide().querySelector('h2') && !slide().querySelector('h1');
+    res.nowrap = [...slide().querySelectorAll('h2 .nowrap')].some(n => n.textContent === 'selected pieces');
+    res.h1s = document.querySelectorAll('#heroCarousel h1').length;
+
+    // Only one piece on sale -> one photo.
+    PRODUCTS.forEach(p => { p.discountPercent = 0; });
+    a.discountPercent = 15; renderHero();
+    res.single = tiles().length;
+
+    // Every sale piece lacks a photo -> today's text-only slide.
+    PRODUCTS.forEach(p => { p.discountPercent = 0; });
+    if (noPhoto) { noPhoto.discountPercent = 15; renderHero(); res.textOnly = !!slide() && tiles().length === 0 && !slide().classList.contains('has-photos'); }
+    else res.textOnly = true;
+
+    // The owner's headline wins, escaped; cleared, the automatic one returns.
+    PRODUCTS.forEach(p => { p.discountPercent = 0; });
+    a.discountPercent = 15;
+    saleTitleText = 'End of summer: short sets, 15% off <img src=x onerror=1>';
+    renderHero();
+    res.custom = slide().querySelector('h2').textContent.trim();
+    res.customSafe = !slide().querySelector('h2 img');
+    // A 70-character headline must not push the page sideways.
+    saleTitleText = 'Our end of summer sale on every short set, linen and silk, 15% off now';
+    renderHero();
+    res.longNoScroll = document.documentElement.scrollWidth <= window.innerWidth;
+    saleTitleText = '';
+    renderHero();
+    res.auto = slide().querySelector('h2').textContent.replace(/\s+/g, ' ').trim();
+  } finally {
+    PRODUCTS.forEach((p, i) => { p.discountPercent = saved[i].d; p.stock = saved[i].s; p.images = saved[i].i; });
+    saleTitleText = savedTitle;
+    renderHero();
+  }
+  return res;
+}).catch(e => ({ error: e.message }));
+if (salePhotos.error) console.log('sale photo checks unavailable:', String(salePhotos.error).slice(0, 200));
+check(`the sale slide shows three photos (${salePhotos.count})`, salePhotos.count === 3);
+check(`biggest discount first, photo-less pieces skipped (${salePhotos.order} vs ${salePhotos.want})`, !!salePhotos.order && salePhotos.order === salePhotos.want);
+check(`each photo carries its sale price ("${salePhotos.tag}")`, (salePhotos.tag || '').includes(salePhotos.wantTag));
+check('the sale heading is an <h2>, leaving one <h1> in the banner', salePhotos.h2 === true && salePhotos.h1s === 1);
+check('"selected pieces" stays together', salePhotos.nowrap === true);
+check('one piece on sale shows one photo', salePhotos.single === 1);
+check('a sale with no photos keeps the text-only slide', salePhotos.textOnly === true);
+check(`the owner's sale headline is used ("${salePhotos.custom}")`, (salePhotos.custom || '').startsWith('End of summer: short sets, 15% off'));
+check('and cannot inject markup', salePhotos.customSafe === true);
+check('a 70-character sale headline does not scroll sideways', salePhotos.longNoScroll === true);
+check(`cleared, the automatic headline returns ("${salePhotos.auto}")`, salePhotos.auto === 'Up to 15% off selected pieces');
 
 // Before sale-pricing.sql runs, shop_settings doesn't exist, and asking for it
 // makes the browser log a 404 in every visitor's console. Products carry no
@@ -587,7 +659,7 @@ const stale = await page.evaluate(async () => {
   // run it yet, so the note is stubbed rather than requested for real.
   const realNote = apiService.getSaleNote;
   apiService.getSaleNote = async () => '';
-  const headline = () => { const h = document.querySelector('.hero-sale h1'); return h ? h.textContent.trim() : '(no sale slide)'; };
+  const headline = () => { const h = document.querySelector('.hero-sale h2'); return h ? h.textContent.trim() : '(no sale slide)'; };
   const chip = () => !!document.querySelector('.sale-chip');
   const reset = () => {
     PRODUCTS.forEach(p => { p.discountPercent = 0; p.stock = 'in'; });
@@ -857,6 +929,41 @@ check('and in the HTML served for a product page', /<h1>Wrapped in softness/.tes
   const box = await nj.locator('.hero-slide').first().boundingBox().catch(() => null);
   check(`with JavaScript off, the hero is on screen (${box ? Math.round(box.height) + 'px tall' : 'absent'})`, !!box && box.height > 150);
   await noJs.close();
+}
+{
+  const phone = await browser.newContext({ viewport: { width: 390, height: 844 } });
+  const pp = await phone.newPage();
+  await pp.goto(BASE + '/', { waitUntil: 'networkidle' });
+  await pp.waitForSelector('.card, .grid-message', { timeout: 25000 });
+  const sideways = await pp.evaluate(() => {
+    PRODUCTS.forEach(p => { p.discountPercent = 0; p.stock = 'in'; });
+    PRODUCTS.filter(p => (p.images || []).length).slice(0, 3).forEach(p => { p.discountPercent = 15; });
+    renderHero(); heroGo(1);
+    return document.documentElement.scrollWidth > window.innerWidth;
+  });
+  check('on a phone, the sale slide with photos does not scroll sideways', sideways === false);
+  // The approved break: "Up to 15% off" / "selected pieces", not "Up to 15%" /
+  // "off selected pieces", which balancing the lines would otherwise choose.
+  const lines = await pp.evaluate(() => {
+    const h = document.querySelector('.hero-sale h2');
+    const range = document.createRange(); range.selectNodeContents(h);
+    const tops = [...range.getClientRects()].map(r => Math.round(r.top));
+    const words = h.textContent.replace(/\s+/g, ' ').trim().split(' ');
+    // the line each word sits on, by the top of its own box
+    const walker = document.createTreeWalker(h, NodeFilter.SHOW_TEXT);
+    const placed = [];
+    for (let n; (n = walker.nextNode());) {
+      const re = /\S+/g; let m;
+      while ((m = re.exec(n.textContent))) {
+        const r = document.createRange(); r.setStart(n, m.index); r.setEnd(n, m.index + m[0].length);
+        placed.push([m[0], Math.round(r.getBoundingClientRect().top)]);
+      }
+    }
+    const firstTop = placed[0][1];
+    return { first: placed.filter(([, t]) => t === firstTop).map(([w]) => w).join(' '), lines: new Set(placed.map(([, t]) => t)).size, words: words.length, tops: tops.length };
+  });
+  check(`on a phone, the sale headline breaks after "off" ("${lines.first}" / …, ${lines.lines} lines)`, /off$/.test(lines.first) && lines.lines === 2);
+  await phone.close();
 }
 
 // Rotation: a sale's two slides advance on their own for most visitors, and
