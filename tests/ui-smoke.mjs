@@ -1189,6 +1189,10 @@ const grid = await page.evaluate(async () => {
     const p = PRODUCTS[1];
     const text = tiles()[1].innerText;
     res.tileHasAll = text.includes(p.name) && text.includes(p.cat) && text.includes('AED ' + chargedPrice(p));
+    const withPhoto = PRODUCTS.findIndex(x => (x.images || []).length > 0);
+    res.tilePhoto = withPhoto >= 0 && !!tiles()[withPhoto].querySelector('img');
+    res.sheetWidth = Math.round(document.getElementById('adminSheet').getBoundingClientRect().width);
+    res.bagWidth = Math.round(document.getElementById('bagSheet').getBoundingClientRect().width);
     tiles()[1].click();
     await new Promise(r => setTimeout(r, 300));
     res.opened = !!document.getElementById('invRow' + p.id);
@@ -1210,6 +1214,9 @@ if (grid.error) console.log('inventory grid checks unavailable:', String(grid.er
 check(`inventory shows a tile per piece (${grid.tiles} of ${grid.total})`, grid.tiles === grid.total && grid.total > 0);
 check('with no controls until a piece is opened', grid.noControls === true);
 check('each tile shows name, category and price', grid.tileHasAll === true);
+check('and the piece\'s photo', grid.tilePhoto === true);
+check(`the admin panel is wider on a desktop screen (${grid.sheetWidth}px)`, grid.sheetWidth >= 900);
+check(`while the bag keeps its width (${grid.bagWidth}px)`, grid.bagWidth === 520);
 check('tapping a tile opens that piece alone, with its controls', grid.opened === true && grid.onlyOne === true);
 check('and a way back to all pieces', grid.hasBack === true);
 check('a change keeps the piece open', grid.staysOpen === true);

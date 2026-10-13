@@ -2134,7 +2134,7 @@ async function renderAdmin() {
     bodyContent = `
       <div style="display:flex; justify-content:space-between; align-items:center; gap:10px; flex-wrap:wrap; margin-bottom:14px;">
         <span style="font-size:13px; color:var(--ink-soft);">Manage stock for <strong>${PRODUCTS.length} pieces</strong></span>
-        <button class="primary-btn" style="font-size:11.5px; padding:6px 12px;" onclick="setAdminTab('add')">+ Add Piece</button>
+        <button class="primary-btn" style="font-size:11.5px; padding:6px 12px; flex:0 0 auto;" onclick="setAdminTab('add')">+ Add Piece</button>
       </div>
       <div class="sale-note-row">
         <input class="form-input" id="saleNoteInput" maxlength="60"
@@ -2149,6 +2149,7 @@ async function renderAdmin() {
         <div class="inventory-grid">
           ${PRODUCTS.map(p => `
             <button class="inv-tile" onclick="openInventoryItem(${p.id})">
+              <span class="inv-tile-thumb" style="${productThumbStyle(p)}">${productMedia(p)}</span>
               <span class="inv-tile-name">${escHtml(p.name)}</span>
               <span class="inv-tile-cat">${escHtml(p.cat)}</span>
               <span class="inv-tile-price">${priceHtml(p)}</span>
