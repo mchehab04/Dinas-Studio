@@ -102,6 +102,7 @@ Either order is genuinely safe. Before the SQL, products have no `discountPercen
 "Write with AI" in the Description editor and on Add Piece calls `/api/describe` (`lib/describe.js`), which sends the piece's name, category, fabric and up to three shrunk photos to Gemini and returns a draft. It only fills the box; nothing is saved until Save.
 
 - **Setup:** a Gemini API key from Google AI Studio, added in Cloudflare Pages → Settings → Variables and Secrets as the secret `GEMINI_API_KEY`, then redeploy. Without it the button says "AI descriptions are not set up yet".
+- **Time limits:** each Gemini attempt gets 25s (`GEMINI_TIMEOUT_MS` overrides it) and a model that times out hands over to the next, like a busy one; the two Supabase reads get 5s. Without limits a hung call ran into Cloudflare's 100s cutoff and the admin saw an HTML 524 page.
 - **Model:** tries `gemini-3.8-flash`, then `gemini-3.6-flash`, then `gemini-2.5-flash` when one is busy (503) or over its free limit (429). `GEMINI_MODEL`, if set, is tried first.
 - **Access:** only the admin. The function checks the caller's Supabase session with `is_admin()` before calling Gemini.
 - **Free tier:** Google may use what is sent to improve its products; the photos are already public on the site.

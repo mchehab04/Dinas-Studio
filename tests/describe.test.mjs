@@ -13,6 +13,7 @@ let geminiReply = { candidates: [{ content: { parts: [{ text: '  "A relaxed silk
 let geminiStatus = 200;
 let calls = [];
 let busy = new Set();   // models answering 503 "high demand"
+let hang = new Set();   // models that never answer; only a timeout signal ends the call
 
 globalThis.fetch = async (url, init = {}) => {
   const u = String(url);
@@ -24,13 +25,16 @@ globalThis.fetch = async (url, init = {}) => {
   ]), { status: 200 });
   if (u.includes('generativelanguage.googleapis.com')) {
     const model = /models\/([^:]+):/.exec(u)[1];
+    if (hang.has(model)) return new Promise((_, reject) => {
+      if (init.signal) init.signal.addEventListener('abort', () => reject(init.signal.reason || new Error('aborted')));
+    });
     if (busy.has(model)) return new Response(JSON.stringify({ error: { code: 503, message: 'This model is currently experiencing high demand.' } }), { status: 503 });
     return new Response(JSON.stringify(geminiReply), { status: geminiStatus });
   }
   return new Response('unexpected', { status: 500 });
 };
 
-const reset = () => { isAdmin = true; geminiStatus = 200; calls = []; busy = new Set();
+const reset = () => { isAdmin = true; geminiStatus = 200; calls = []; busy = new Set(); hang = new Set();
   geminiReply = { candidates: [{ content: { parts: [{ text: '  "A relaxed silk set with a soft drape."  ' }] } }] }; };
 const req = (body, { token = 'user-jwt', method = 'POST' } = {}) => new Request('https://x/api/describe', {
   method,
@@ -119,6 +123,25 @@ check('a bad key is not retried on other models', tried().length === 1);
 reset(); busy = new Set(['gemini-2.5-flash']);
 await handle(req(good), { ...env, GEMINI_MODEL: 'gemini-2.5-flash' });
 check('a GEMINI_MODEL override is tried first, then the defaults', tried()[0] === 'gemini-2.5-flash' && tried()[1] === 'gemini-3.8-flash');
+
+// A model that never answers must not hang the request until Cloudflare cuts it
+// off with its own HTML 524 page: each attempt has a time limit, and a model
+// that times out hands over to the next, like a busy one.
+const envFast = { ...env, GEMINI_TIMEOUT_MS: '150' };
+const guard = (p, ms = 4000) => Promise.race([p, new Promise(r => setTimeout(() => r(null), ms))]);
+reset(); hang = new Set(['gemini-3.8-flash']);
+const hung = await guard(handle(req(good), envFast));
+check('3.8 Flash hangs -> 3.6 Flash answers', !!hung && hung.status === 200 && JSON.stringify(tried()) === JSON.stringify(['gemini-3.8-flash', 'gemini-3.6-flash']));
+reset(); hang = new Set(['gemini-3.8-flash', 'gemini-3.6-flash', 'gemini-2.5-flash']);
+const allHung = await guard(handle(req(good), envFast));
+const allHungText = allHung ? await allHung.text() : '';
+check(`every model hanging -> a 4xx that says so ("${allHungText}")`, !!allHung && allHung.status === 429 && /too long|try again later/i.test(allHungText));
+reset(); hang = new Set(['gemini-3.8-flash', 'gemini-3.6-flash', 'gemini-2.5-flash']);
+const t0 = Date.now(); await guard(handle(req(good), envFast));
+check(`and gives up within the budget (${Date.now() - t0}ms)`, Date.now() - t0 < 2000);
+reset(); await handle(req(good), envFast);
+const slowCalls = calls.filter(c => /is_admin|rest\/v1\/products/.test(c.url));
+check('the admin check and example read are time-limited too', slowCalls.length === 2 && slowCalls.every(c => !!c.init.signal));
 
 reset(); geminiStatus = 429; geminiReply = { error: { message: 'quota' } };
 const limited = await handle(req(good), env);
